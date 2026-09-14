@@ -16,7 +16,8 @@ namespace greeter {
     std::string command;
     // From DesktopNames= (desktop-entry ;-list). Empty when unset (synthetic Shell).
     std::string desktopNames;
-    // "wayland" for wayland-sessions entries; "tty" for the synthetic Shell fallback.
+    // "wayland" for wayland-sessions entries, "x11" for xsessions entries, "tty" for the
+    // synthetic Shell fallback.
     std::string sessionType = "wayland";
   };
 

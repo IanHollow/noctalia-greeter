@@ -114,6 +114,14 @@ Put names containing spaces or punctuation in `greeter.toml` instead of leaving 
 
 GNOME expects a systemd-managed user session and may fail with a `graphical-session-pre.target` error. The greeter passes `XDG_SESSION_TYPE` and the desktop entry's `DesktopNames` environment through greetd, but GNOME support remains best-effort compared with GDM. If the normal entry still fails, use GDM for GNOME or create a suitable `wayland-sessions` wrapper.
 
+### X11 session doesn't start
+
+noctalia-greeter discovers `xsessions` entries but does not start `Xorg`
+itself. If the selected session exits immediately with no `DISPLAY` set, its
+`Exec=` needs to start its own X server first (for example via `startx` or
+`xinit`) before running the desktop environment. See
+[Default session](configuration.md#default-session).
+
 ## Sync and Polkit
 
 ### Appearance sync

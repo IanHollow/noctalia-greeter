@@ -360,6 +360,16 @@ wallpaper_span_geometry_test = executable(
 
 test('wallpaper-span-geometry', wallpaper_span_geometry_test)
 
+session_discovery_test = executable(
+  'session-discovery-test',
+  sources: files('tests/session_discovery_test.cpp', 'src/greeter/greeter_sessions.cpp'),
+  include_directories: include_directories('src'),
+  cpp_args: ['-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wshadow'],
+  build_by_default: false,
+)
+
+test('session-discovery', session_discovery_test)
+
 wallpaper_program_pixel_test = executable(
   'wallpaper-program-pixel-test',
   sources: files(

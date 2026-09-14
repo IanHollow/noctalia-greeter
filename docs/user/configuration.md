@@ -83,10 +83,18 @@ The value is the desktop entry's exact **`Name=`**, which is the same text shown
 noctalia-greeter sessions
 ```
 
-Sessions are discovered from `wayland-sessions` directories under
-`/usr/local/share`, `/usr/share`, `/run/current-system/sw/share`, and each base
-path in `XDG_DATA_DIRS`. Name lookup is case-insensitive, but using the exact
-picker spelling keeps the configuration unambiguous.
+Sessions are discovered from `wayland-sessions` and `xsessions` directories
+under `/usr/local/share`, `/usr/share`, `/run/current-system/sw/share`, and
+each base path in `XDG_DATA_DIRS`. Name lookup is case-insensitive, but using
+the exact picker spelling keeps the configuration unambiguous. If a
+`wayland-sessions` and an `xsessions` entry share the same `Name=`, the
+`wayland-sessions` entry wins.
+
+noctalia-greeter does not start an X server. An `xsessions` entry's `Exec=`
+must bootstrap its own `Xorg` (for example via `startx` or `xinit`), the way
+distro-provided X11 session wrappers already do; otherwise the session exits
+immediately with no `DISPLAY` set. See
+[X11 session doesn't start](troubleshooting.md#x11-session-doesnt-start).
 
 Set the default declaratively, especially when it contains spaces or punctuation:
 

@@ -96,6 +96,7 @@ the sources.
 | **D-Bus** | `noctalia-greeter-session` wraps the compositor in `dbus-run-session` |
 | PAM (`/etc/pam.d/greetd`) | Authentication |
 | Wayland sessions | `.desktop` files under `wayland-sessions` (niri, Hyprland, etc.) |
+| X11 sessions (optional) | `.desktop` files under `xsessions`; noctalia-greeter does not start `Xorg` itself, so the entry's `Exec=` must bootstrap it |
 | wlroots 0.20 | `noctalia-greeter-compositor` (KMS, libinput, xkbcommon, wayland-server) |
 | Mesa / EGL / GLES | Greeter client rendering (or epoxy where distros split packages that way) |
 | Cairo, Pango, Fontconfig, FreeType, HarfBuzz, librsvg, GLib | Text and UI rendering |
