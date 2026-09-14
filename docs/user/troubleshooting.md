@@ -116,11 +116,26 @@ GNOME expects a systemd-managed user session and may fail with a `graphical-sess
 
 ### X11 session doesn't start
 
-noctalia-greeter discovers `xsessions` entries but does not start `Xorg`
-itself. If the selected session exits immediately with no `DISPLAY` set, its
-`Exec=` needs to start its own X server first (for example via `startx` or
-`xinit`) before running the desktop environment. See
-[Default session](configuration.md#default-session).
+`xsessions` entries run through `noctalia-greeter-xsession`, which needs
+`startx` (from `xinit`) installed. `startx: command not found` (or
+noctalia-greeter's own "startx not found" error) in the session log means
+`xinit` is missing.
+
+If `startx` is present but Xorg itself fails, reproduce the exact wrapper
+invocation by hand from a terminal to see the real Xorg error:
+
+```sh
+noctalia-greeter-xsession /path/to/session/binary
+```
+
+A `parse_vt_settings: Cannot open /dev/tty0 (Permission denied)` error here
+usually means `XDG_VTNR` was unset in the environment you ran this from (it
+is only guaranteed to be set for a real session opened by greetd's PAM
+stack, e.g. via `pam_elogind.so`/`pam_systemd.so` in `/etc/pam.d/greetd`) —
+this is expected when testing from an existing desktop session rather than
+through the greeter. See
+[Default session](configuration.md#default-session) for what the wrapper
+does and why.
 
 ## Sync and Polkit
 

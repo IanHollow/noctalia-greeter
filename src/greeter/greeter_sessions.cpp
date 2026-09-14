@@ -248,4 +248,26 @@ namespace greeter {
     return env;
   }
 
+  std::vector<std::string> sessionArgv(const SessionOption& session) {
+    std::vector<std::string> tokens;
+    std::istringstream stream(session.command);
+    std::string token;
+    while (stream >> token) {
+      tokens.push_back(token);
+    }
+    if (tokens.empty()) {
+      return tokens;
+    }
+
+    if (session.sessionType == "x11") {
+      std::vector<std::string> wrapped;
+      wrapped.reserve(tokens.size() + 1);
+      wrapped.push_back("noctalia-greeter-xsession");
+      wrapped.insert(wrapped.end(), tokens.begin(), tokens.end());
+      return wrapped;
+    }
+
+    return tokens;
+  }
+
 } // namespace greeter

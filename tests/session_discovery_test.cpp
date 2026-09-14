@@ -73,6 +73,44 @@ namespace {
     }
   }
 
+  void expectArgv(
+      const std::vector<std::string>& actual, const std::vector<std::string>& expected, const std::string& message
+  ) {
+    expect(actual == expected, message);
+  }
+
+  void testSessionArgv() {
+    const greeter::SessionOption wayland{
+        .name = "Niri", .command = "niri", .desktopNames = "niri", .sessionType = "wayland"
+    };
+    expectArgv(greeter::sessionArgv(wayland), {"niri"}, "wayland session argv is unwrapped");
+
+    const greeter::SessionOption multiToken{
+        .name = "GNOME",
+        .command = "dbus-run-session gnome-session",
+        .desktopNames = "GNOME",
+        .sessionType = "wayland",
+    };
+    expectArgv(
+        greeter::sessionArgv(multiToken), {"dbus-run-session", "gnome-session"},
+        "multi-token wayland Exec= splits correctly"
+    );
+
+    const greeter::SessionOption x11{
+        .name = "Bspwm", .command = "/usr/bin/bspwm", .desktopNames = "bspwm", .sessionType = "x11"
+    };
+    expectArgv(
+        greeter::sessionArgv(x11), {"noctalia-greeter-xsession", "/usr/bin/bspwm"},
+        "x11 session argv is wrapped in noctalia-greeter-xsession"
+    );
+
+    const greeter::SessionOption tty{.name = "Shell", .command = "/bin/sh", .desktopNames = {}, .sessionType = "tty"};
+    expectArgv(greeter::sessionArgv(tty), {"/bin/sh"}, "tty fallback session argv is unwrapped");
+
+    const greeter::SessionOption empty{.name = "Empty", .command = "  ", .desktopNames = {}, .sessionType = "wayland"};
+    expect(greeter::sessionArgv(empty).empty(), "whitespace-only Exec= yields empty argv");
+  }
+
 } // namespace
 
 int main() {
@@ -96,6 +134,8 @@ int main() {
   expect(shared.has_value(), "Shared session discovered");
   expect(sessions[*shared].sessionType == "wayland", "Shared name collision keeps wayland-sessions entry");
   expect(sessions[*shared].command == "/usr/bin/shared-wayland", "Shared command keeps wayland-sessions Exec=");
+
+  testSessionArgv();
 
   return 0;
 }

@@ -30,4 +30,9 @@ namespace greeter {
   // Env for greetd start_session (must be set before PAM opens the session).
   [[nodiscard]] std::vector<GreetdEnvironmentEntry> sessionStartEnvironment(const SessionOption& session);
 
+  // Full argv to execute for this session: the split Exec= tokens for wayland/tty
+  // sessions, or the same tokens wrapped in noctalia-greeter-xsession for x11 sessions
+  // (which need Xorg bootstrapped first). Empty when Exec= is empty or whitespace-only.
+  [[nodiscard]] std::vector<std::string> sessionArgv(const SessionOption& session);
+
 } // namespace greeter
