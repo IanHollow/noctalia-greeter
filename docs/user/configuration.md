@@ -105,7 +105,11 @@ elogind/systemd-logind instead of needing root: `-seat` gets the device
 handoff, and the explicit `vtN` is required separately because Xorg only
 skips its normally-root-only `/dev/tty0` probe when a VT number is given
 directly on the command line. `XDG_SEAT`/`XDG_VTNR` come from the PAM
-session the same way `XDG_SESSION_TYPE` does. See
+session the same way `XDG_SESSION_TYPE` does. The wrapper also resolves a
+bare `Exec=` program name (e.g. `Exec=bspwm`) to an absolute path before
+handing it to `startx`, since some `startx` implementations only accept the
+client as a direct path and silently fall back to their default client
+(`xterm`) otherwise. See
 [X11 session doesn't start](troubleshooting.md#x11-session-doesnt-start) if
 it still fails.
 

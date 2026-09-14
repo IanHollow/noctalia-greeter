@@ -133,7 +133,14 @@ usually means `XDG_VTNR` was unset in the environment you ran this from (it
 is only guaranteed to be set for a real session opened by greetd's PAM
 stack, e.g. via `pam_elogind.so`/`pam_systemd.so` in `/etc/pam.d/greetd`) —
 this is expected when testing from an existing desktop session rather than
-through the greeter. See
+through the greeter.
+
+If Xorg starts but the screen shows a terminal instead of the desktop, with
+an error like `xterm: bad command line option`, the wrapper's `startx` fell
+back to its default client instead of running the session — this is handled
+automatically since noctalia-greeter resolves `Exec=` to an absolute path
+before calling `startx`, but a very old or unusual `startx` implementation
+may still behave differently. See
 [Default session](configuration.md#default-session) for what the wrapper
 does and why.
 
