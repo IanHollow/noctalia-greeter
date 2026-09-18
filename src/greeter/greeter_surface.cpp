@@ -1050,7 +1050,7 @@ void GreeterSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
 
   m_backdrop->setPosition(ox, oy);
   m_backdrop->setSize(sw, sh);
-  if (m_hasSyncedWallpaper) {
+  if (m_hasWallpaper) {
     // WallpaperNode draws the image and any letterbox fill; keep backdrop
     // hidden so we do not paint wallpaperFillColor as a full-screen overlay on
     // top.
@@ -1813,6 +1813,7 @@ void GreeterSurface::refreshSelectionLabels() {
 void GreeterSurface::buildSchemeNames() {
   m_schemeNames.clear();
   m_syncedAppearance = loadGreeterSyncedAppearance();
+  m_wallpaperAppearance = loadGreeterWallpaperAppearance();
   if (m_syncedAppearance.has_value()) {
     m_schemeNames.emplace_back(greeter::appearance::kSyncedSchemeDisplayName);
     m_selectedScheme = 0;
@@ -1845,11 +1846,8 @@ void GreeterSurface::setBoundOutputName(std::string outputName) {
     return;
   }
   m_boundOutputName = std::move(outputName);
-  // Re-resolve synced wallpaper for this connector after binding.
-  if (isSyncedScheme(m_selectedScheme)) {
-    applyScheme(m_selectedScheme);
-    requestLayout();
-  }
+  applyConfiguredWallpaper();
+  requestLayout();
 }
 
 void GreeterSurface::setWallpaperSpanParams(const WallpaperSpanParams& params) {
@@ -1864,11 +1862,29 @@ void GreeterSurface::setWallpaperSpanParams(const WallpaperSpanParams& params) {
 }
 
 void GreeterSurface::clearWallpaperDisplay() {
-
-  m_hasSyncedWallpaper = false;
+  m_hasWallpaper = false;
   m_wallpaperPath.clear();
   m_wallpaperFillMode = WallpaperFillMode::Crop;
   m_wallpaperFillColor = rgba(0.0f, 0.0f, 0.0f, 0.0f);
+  m_wallpaperDirty = true;
+}
+
+void GreeterSurface::applyConfiguredWallpaper() {
+  if (!m_wallpaperAppearance.has_value()) {
+    clearWallpaperDisplay();
+    return;
+  }
+
+  const auto wallpaper = m_wallpaperAppearance->wallpaperForOutput(m_boundOutputName);
+  if (!wallpaper.has_value()) {
+    clearWallpaperDisplay();
+    return;
+  }
+
+  m_wallpaperPath = wallpaper->path;
+  m_wallpaperFillMode = wallpaper->fillMode;
+  m_wallpaperFillColor = wallpaper->fillColor;
+  m_hasWallpaper = !m_wallpaperPath.empty() || m_wallpaperFillColor.a > 0.0f;
   m_wallpaperDirty = true;
 }
 
@@ -1894,12 +1910,7 @@ void GreeterSurface::applyScheme(const std::size_t schemeIndex) {
     if (m_renderContext != nullptr && !m_syncedAppearance->fontFamily.empty()) {
       m_renderContext->setTextFontFamily(m_syncedAppearance->fontFamily);
     }
-    const auto wallpaper = m_syncedAppearance->wallpaperForOutput(m_boundOutputName);
-    m_wallpaperPath = wallpaper.path;
-    m_wallpaperFillMode = wallpaper.fillMode;
-    m_wallpaperFillColor = wallpaper.fillColor;
-    m_hasSyncedWallpaper = !m_wallpaperPath.empty();
-    m_wallpaperDirty = true;
+    applyConfiguredWallpaper();
     return;
   }
 
@@ -1907,7 +1918,7 @@ void GreeterSurface::applyScheme(const std::size_t schemeIndex) {
     setPalette(builtinPalette->dark.palette);
   }
   Style::setCornerRadiusScale(1.0f);
-  clearWallpaperDisplay();
+  applyConfiguredWallpaper();
 }
 
 void GreeterSurface::syncHeaderUserAvatar(
@@ -1975,6 +1986,20 @@ void GreeterSurface::syncWallpaperTexture() {
     m_wallpaperTexture = {};
   }
 
+  const auto useFillColor = [this]() {
+    if (m_wallpaperFillColor.a <= 0.0f) {
+      return false;
+    }
+    m_wallpaper->setSources(
+        WallpaperSourceKind::Color, {}, m_wallpaperFillColor, WallpaperSourceKind::Color, {}, m_wallpaperFillColor,
+        0.0f, 0.0f, 0.0f, 0.0f
+    );
+    m_wallpaper->setTransition(WallpaperTransition::Fade, 0.0f, TransitionParams{});
+    m_wallpaper->setFillMode(m_wallpaperFillMode);
+    m_wallpaper->setFillColor(m_wallpaperFillColor);
+    return true;
+  };
+
   Color color;
   if (parseColorWallpaperPath(m_wallpaperPath, color)) {
     m_wallpaper->setSources(
@@ -1996,12 +2021,18 @@ void GreeterSurface::syncWallpaperTexture() {
         m_wallpaper->setFillMode(m_wallpaperFillMode);
         m_wallpaper->setFillColor(m_wallpaperFillColor);
       } else {
-        m_wallpaper->setTextures({}, {}, 0.0f, 0.0f, 0.0f, 0.0f);
+        if (!useFillColor()) {
+          m_wallpaper->setTextures({}, {}, 0.0f, 0.0f, 0.0f, 0.0f);
+          m_hasWallpaper = false;
+        }
       }
     } else {
-      m_wallpaper->setTextures({}, {}, 0.0f, 0.0f, 0.0f, 0.0f);
+      if (!useFillColor()) {
+        m_wallpaper->setTextures({}, {}, 0.0f, 0.0f, 0.0f, 0.0f);
+        m_hasWallpaper = false;
+      }
     }
-  } else {
+  } else if (!useFillColor()) {
     m_wallpaper->setTextures({}, {}, 0.0f, 0.0f, 0.0f, 0.0f);
   }
 

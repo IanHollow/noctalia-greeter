@@ -49,7 +49,7 @@ namespace greeter::config {
     // UI element positioning: "hidden", "bottom-left", "bottom-right", "top-left", "top-right"
     std::optional<std::string> appearancePowerButtonsPosition;
     std::optional<std::string> appearanceSchemeSelectorPosition;
-    // Optional palette/wallpaper/font; wins over Sync sync.toml when complete.
+    // Optional palette/wallpaper/font; declarative values win over matching Sync values.
     GreeterTomlAppearance appearance;
 
     std::optional<std::string> outputName;

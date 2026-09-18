@@ -338,7 +338,11 @@ test(
 
 legacy_staging_compatibility_test = executable(
   'legacy-staging-compatibility-test',
-  sources: _apply_appearance_support_sources + files('tests/legacy_staging_compatibility_test.cpp'),
+  sources: _apply_appearance_support_sources + files(
+    'src/greeter/appearance_config.cpp',
+    'src/render/core/color.cpp',
+    'tests/legacy_staging_compatibility_test.cpp',
+  ),
   dependencies: [nlohmann_dep, tomlplusplus_dep],
   include_directories: _greeter_tools_inc,
   cpp_args: [

@@ -159,6 +159,7 @@ private:
   void savePreferences() const;
   void buildSchemeNames();
   void applyScheme(std::size_t schemeIndex);
+  void applyConfiguredWallpaper();
   void clearWallpaperDisplay();
   [[nodiscard]] bool isSyncedScheme(std::size_t schemeIndex) const;
   [[nodiscard]] std::optional<std::size_t> findSchemeIndex(std::string_view name) const;
@@ -258,7 +259,7 @@ private:
   Color m_wallpaperFillColor = rgba(0.0f, 0.0f, 0.0f, 0.0f);
   WallpaperSpanParams m_wallpaperSpanParams;
   bool m_wallpaperDirty = false;
-  bool m_hasSyncedWallpaper = false;
+  bool m_hasWallpaper = false;
   bool m_hideLogo = false;
   // UI element positioning: "hidden", "bottom-left", "bottom-right", "top-left", "top-right"
   std::string m_powerButtonsPosition;
@@ -312,6 +313,7 @@ private:
   std::vector<std::string> m_schemeNames;
   std::size_t m_selectedScheme = 0;
   std::optional<GreeterSyncedAppearance> m_syncedAppearance;
+  std::optional<GreeterWallpaperAppearance> m_wallpaperAppearance;
 
   void loadUsers();
   void loadSessions();
