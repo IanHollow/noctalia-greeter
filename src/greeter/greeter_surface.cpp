@@ -106,7 +106,11 @@ namespace {
             || sym == 'x'
             || sym == 'X'
             || sym == XKB_KEY_x
-            || sym == XKB_KEY_X);
+            || sym == XKB_KEY_X
+            || sym == 'u'
+            || sym == 'U'
+            || sym == XKB_KEY_u
+            || sym == XKB_KEY_U);
   }
 
   void appendDummyUsers(std::vector<std::string>& users, std::vector<uid_t>& uids) {

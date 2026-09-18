@@ -304,8 +304,11 @@ void Input::handleKey(std::uint32_t sym, std::uint32_t utf32, std::uint32_t modi
   }
 
   if (ctrl && (sym == 'u' || sym == 'U' || sym == XKB_KEY_u || sym == XKB_KEY_U)) {
-    if (!m_value.empty()) {
-      m_value.clear();
+    if (hasSelection()) {
+      deleteSelection();
+      changed = true;
+    } else if (m_cursorPos > 0) {
+      m_value.erase(0, m_cursorPos);
       m_cursorPos = 0;
       m_selectionAnchor = 0;
       changed = true;
