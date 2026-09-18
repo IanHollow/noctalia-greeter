@@ -1316,8 +1316,13 @@ select_output_mode(struct wlr_output* wlr_output, int manual_width, int manual_h
     return NULL;
   }
 
-  // EDID may list several refresh rates at the preferred resolution. Honor a
-  // configured rate there, otherwise retain the highest-refresh behavior.
+  // Preserve the complete EDID-preferred mode by default. Choosing a higher
+  // refresh at the same resolution can exceed a dock or MST link's bandwidth.
+  if (refresh_mhz <= 0) {
+    return preferred;
+  }
+
+  // An explicit refresh-rate override applies at the preferred resolution.
   return select_mode_at_size(wlr_output, preferred->width, preferred->height, refresh_mhz);
 }
 
