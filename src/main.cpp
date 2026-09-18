@@ -91,6 +91,11 @@ int main(int argc, char* argv[]) {
   }
 
   if (argc >= 2 && std::strcmp(argv[1], "outputs") == 0) {
+    const bool details = argc >= 3 && std::strcmp(argv[2], "--details") == 0;
+    if (argc > (details ? 3 : 2)) {
+      std::fputs("error: usage: noctalia-greeter outputs [--details]\n", stderr);
+      return 1;
+    }
     WaylandClient client;
     if (!client.connect()) {
       std::fputs("error: connect to Wayland compositor first (e.g. just run-niri)\n", stderr);
@@ -106,7 +111,12 @@ int main(int argc, char* argv[]) {
       if (!output.done || output.name.empty()) {
         continue;
       }
-      std::printf("%s\n", output.name.c_str());
+      const std::string identifier = output.stableIdentifier();
+      if (details && !identifier.empty() && identifier != output.name) {
+        std::printf("%s\t%s\n", output.name.c_str(), identifier.c_str());
+      } else {
+        std::printf("%s\n", output.name.c_str());
+      }
       any = true;
     }
     if (!any) {
@@ -152,7 +162,7 @@ int main(int argc, char* argv[]) {
       std::puts(
           "Usage: noctalia-greeter [OPTIONS]\n"
           "       noctalia-greeter sessions\n"
-          "       noctalia-greeter outputs\n"
+          "       noctalia-greeter outputs [--details]\n"
           "       noctalia-greeter passwordless-sync enable USER\n"
           "       noctalia-greeter passwordless-sync disable USER\n"
           "       noctalia-greeter passwordless-sync status [USER]\n"
@@ -161,7 +171,7 @@ int main(int argc, char* argv[]) {
           "\n"
           "Commands:\n"
           "  sessions              List available session names and exit\n"
-          "  outputs               List Wayland connector names and exit\n"
+          "  outputs [--details]   List connectors and stable display identifiers\n"
           "  passwordless-sync     Manage constrained passwordless appearance sync\n"
           "\n"
           "Options:\n"

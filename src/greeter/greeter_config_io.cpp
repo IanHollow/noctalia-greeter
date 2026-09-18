@@ -82,6 +82,7 @@ namespace {
         || key == "scales"
         || key == "width"
         || key == "height"
+        || key == "refresh_rate"
         || key == "transforms";
   }
 
@@ -301,6 +302,14 @@ namespace {
               config.outputModeHeight = *height;
             } else {
               kLog.warn("{}: invalid output.height value", path.string());
+            }
+          } else if (entryView == "refresh_rate") {
+            if (const auto refreshRate = positiveFloatValue(entryNode); refreshRate && *refreshRate <= 1000.0f) {
+              config.outputRefreshRate = *refreshRate;
+            } else if (const auto refreshRateMap = stringValue(entryNode)) {
+              config.outputRefreshRateMap = *refreshRateMap;
+            } else {
+              kLog.warn("{}: invalid output.refresh_rate value", path.string());
             }
           } else if (entryView == "transforms") {
             config.outputTransforms = stringValue(entryNode);
@@ -523,6 +532,16 @@ namespace {
     }
     if (config.outputModeHeight.has_value()) {
       output.insert_or_assign("height", static_cast<int64_t>(*config.outputModeHeight));
+    }
+    if (config.outputRefreshRate.has_value()) {
+      output.insert_or_assign("refresh_rate", static_cast<double>(*config.outputRefreshRate));
+    } else {
+      insertString(
+          output, "refresh_rate", config.outputRefreshRateMap,
+          [](toml::table& table, std::string_view key, const std::string& value) {
+            table.insert_or_assign(std::string(key), value);
+          }
+      );
     }
     insertString(
         output, "transforms", config.outputTransforms,
@@ -921,7 +940,8 @@ namespace greeter::config {
            "theme_mode, corner_radius_scale, font_family\n";
     out << "# [appearance.palette] full color role table, [appearance.wallpaper] path/fill_mode/fill_color\n";
     out << "# [appearance.wallpapers.<connector>] per-output wallpaper overrides\n";
-    out << "# [output] name/layout/scale/scales/width/height/transforms, [idle] timeout, [cursor] theme/size/path\n";
+    out << "# [output] name/layout/scale/scales/width/height/refresh_rate/transforms, "
+           "[idle] timeout, [cursor] theme/size/path\n";
     out << "# [keyboard] layout/variant/options/numlock\n";
     out << "# [auth] allow_empty_password (bool), request_timeout (0-3600 seconds; default 60, 0 disables)\n";
     out << '\n';
@@ -1085,6 +1105,7 @@ extern "C" void greeter_compositor_config_load(const char* state_dir, struct gre
       preferString(config.outputTransforms, sync.outputTransforms)
   );
   copyString(out->output_scales, sizeof(out->output_scales), preferString(config.outputScales, sync.outputScales));
+  copyString(out->output_refresh_rate_map, sizeof(out->output_refresh_rate_map), config.outputRefreshRateMap);
 
   if (config.outputScale.has_value() && *config.outputScale >= 1.0f) {
     out->manual_scale = *config.outputScale;
@@ -1094,6 +1115,9 @@ extern "C" void greeter_compositor_config_load(const char* state_dir, struct gre
   }
   if (config.outputModeHeight.has_value() && *config.outputModeHeight > 0) {
     out->manual_mode_height = *config.outputModeHeight;
+  }
+  if (config.outputRefreshRate.has_value() && *config.outputRefreshRate > 0.0f) {
+    out->manual_mode_refresh_mhz = static_cast<int>(std::lround(*config.outputRefreshRate * 1000.0f));
   }
   if (config.idleTimeoutSec.has_value() && *config.idleTimeoutSec >= 0) {
     out->idle_timeout_sec = *config.idleTimeoutSec;

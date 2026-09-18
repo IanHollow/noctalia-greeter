@@ -157,6 +157,43 @@ int main() {
 
     {
       Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[output]
+name = "Acer Technologies XV242Y TL1EE0018521"
+width = 1920
+height = 1080
+refresh_rate = 120
+)toml";
+
+      greeter_compositor_config config{};
+      greeter_compositor_config_load(fixture.runtimeDirectory.c_str(), &config);
+      expect(
+          "stable output identifier parses",
+          std::string_view(config.preferred_output) == "Acer Technologies XV242Y TL1EE0018521", true, {}, passed
+      );
+      expect("output width parses", config.manual_mode_width == 1920, true, {}, passed);
+      expect("output height parses", config.manual_mode_height == 1080, true, {}, passed);
+      expect("output refresh rate parses", config.manual_mode_refresh_mhz == 120000, true, {}, passed);
+    }
+
+    {
+      Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[output]
+refresh_rate = "DP-1:120; HDMI-A-1:60"
+)toml";
+
+      greeter_compositor_config config{};
+      greeter_compositor_config_load(fixture.runtimeDirectory.c_str(), &config);
+      expect(
+          "per-output refresh rates parse", std::string_view(config.output_refresh_rate_map) == "DP-1:120; HDMI-A-1:60",
+          true, {}, passed
+      );
+      expect("refresh map is not a global rate", config.manual_mode_refresh_mhz == 0, true, {}, passed);
+    }
+
+    {
+      Fixture fixture(0700, 0600);
       writeSpanSyncToml(fixture.syncFile);
       greeter::config::clearConfigDiagnostics();
       const auto sync = greeter::config::loadSync(fixture.syncFile);

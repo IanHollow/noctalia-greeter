@@ -7,10 +7,12 @@ extern "C" {
 #endif
 
 struct greeter_compositor_config {
-  char preferred_output[128];
+  char preferred_output[512];
   float manual_scale;
   int manual_mode_width;
   int manual_mode_height;
+  int manual_mode_refresh_mhz;
+  char output_refresh_rate_map[4096];
   char output_transforms[2048];
   char output_scales[2048];
   int idle_timeout_sec;

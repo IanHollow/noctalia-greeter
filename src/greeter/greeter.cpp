@@ -57,7 +57,7 @@ namespace {
       return;
     }
 
-    kLog.info("preferred output connector: {}", *configured);
+    kLog.info("preferred output: {}", *configured);
   }
 } // namespace
 

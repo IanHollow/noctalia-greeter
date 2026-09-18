@@ -70,14 +70,19 @@ fill_mode = "crop"
 # fill_mode = "crop"
 
 [output]
-# Pin the greeter to one connector; omit to mirror on every monitor.
-# List names with: noctalia-greeter outputs
+# Pin the greeter to one connector or stable EDID identifier; omit to mirror on every monitor.
+# List both with: noctalia-greeter outputs --details
 name = "DP-2"
+# name = "Acer Technologies XV242Y TL1EE0018521"
 # Multi-monitor positions (logical pixels). Overrides Sync layout in sync.toml when set.
 layout = "DP-1:0,0; DP-2:2560,0"
 # Preferred DRM mode size in pixels (both required if set).
 width = 5120
 height = 2160
+# Preferred refresh rate in Hz; nominal values match fractional modes within 1 Hz.
+refresh_rate = 120
+# Or configure different rates per output (use one form or the other).
+# refresh_rate = "DP-1:120; HDMI-A-1:60"
 # Per-connector DRM transform. Overrides Sync transforms in sync.toml when set.
 # Tokens: normal/0/none, 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
 transforms = "DP-1:normal; DP-2:normal"
