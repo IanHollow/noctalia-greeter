@@ -282,6 +282,7 @@ install_data(
 executable('noctalia-greeter-compositor',
   sources: files(
     'src/compositor/noctalia_compositor.c',
+    'src/compositor/system_keyboard_config.c',
     'src/core/log.cpp',
     'src/greeter/greeter_config_io.cpp',
   ),
@@ -363,6 +364,19 @@ wallpaper_span_geometry_test = executable(
 )
 
 test('wallpaper-span-geometry', wallpaper_span_geometry_test)
+
+system_keyboard_config_test = executable(
+  'system-keyboard-config-test',
+  sources: files(
+    'tests/system_keyboard_config_test.c',
+    'src/compositor/system_keyboard_config.c',
+  ),
+  include_directories: include_directories('src'),
+  c_args: ['-Wall', '-Wextra', '-Wpedantic', '-Wconversion'],
+  build_by_default: false,
+)
+
+test('system-keyboard-config', system_keyboard_config_test)
 
 wallpaper_program_pixel_test = executable(
   'wallpaper-program-pixel-test',

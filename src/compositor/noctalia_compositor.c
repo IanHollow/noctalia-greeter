@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "compositor/system_keyboard_config.h"
 #include "greeter/greeter_config_io.h"
 
 #include <ctype.h>
@@ -709,6 +710,42 @@ static void read_greeter_config(struct greeter_server* server) {
 
 static struct xkb_keymap* compose_keyboard_keymap(struct xkb_context* context, const struct greeter_server* server) {
   if (server->keyboard_layout[0] == '\0') {
+    const char* environment_layout = getenv("XKB_DEFAULT_LAYOUT");
+    if (environment_layout != NULL && environment_layout[0] != '\0') {
+      wlr_log(WLR_INFO, "keyboard: using XKB_DEFAULT_* environment configuration");
+      return xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    }
+
+    struct system_keyboard_config system_config;
+    char source_path[PATH_MAX];
+    if (system_keyboard_config_load(&system_config, source_path, sizeof(source_path))) {
+      const char* environment_model = getenv("XKB_DEFAULT_MODEL");
+      const char* environment_variant = getenv("XKB_DEFAULT_VARIANT");
+      const char* environment_options = getenv("XKB_DEFAULT_OPTIONS");
+      struct xkb_rule_names system_names = {0};
+      system_names.model = environment_model != NULL && environment_model[0] != '\0'
+          ? environment_model
+          : (system_config.model[0] != '\0' ? system_config.model : NULL);
+      system_names.layout = system_config.layout;
+      system_names.variant = environment_variant != NULL && environment_variant[0] != '\0'
+          ? environment_variant
+          : (system_config.variant[0] != '\0' ? system_config.variant : NULL);
+      system_names.options = environment_options != NULL && environment_options[0] != '\0'
+          ? environment_options
+          : (system_config.options[0] != '\0' ? system_config.options : NULL);
+      struct xkb_keymap* system_keymap = xkb_keymap_new_from_names(context, &system_names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+      if (system_keymap != NULL) {
+        wlr_log(
+            WLR_INFO, "keyboard: loaded system XKB config from %s (model=%s layout=%s variant=%s options=%s)",
+            source_path, system_names.model != NULL ? system_names.model : "(default)", system_names.layout,
+            system_names.variant != NULL ? system_names.variant : "(default)",
+            system_names.options != NULL ? system_names.options : "(none)"
+        );
+        return system_keymap;
+      }
+      wlr_log(WLR_ERROR, "keyboard: failed to compile system XKB config from %s", source_path);
+    }
+
     return xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
   }
 
