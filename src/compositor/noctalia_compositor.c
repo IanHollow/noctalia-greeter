@@ -1358,6 +1358,47 @@ static bool commit_output_enabled(struct greeter_output* output) {
 
 static bool enable_layout_output(struct greeter_output* output, int layout_x, int layout_y);
 
+static void load_cursor_theme_for_scale(struct greeter_server* server, float scale) {
+  if (!wlr_xcursor_manager_load(server->cursor_mgr, scale)) {
+    wlr_log(WLR_ERROR, "failed to load cursor theme at scale %.2f", scale);
+    return;
+  }
+
+  if (server->cursor_mgr->name == NULL) {
+    return;
+  }
+
+  struct wlr_xcursor_manager_theme* loaded;
+  wl_list_for_each(loaded, &server->cursor_mgr->scaled_themes, link) {
+    if (loaded->scale != scale) {
+      continue;
+    }
+    // wlroots renames the loaded theme to "default" when it silently falls
+    // back to its built-in cursor data.
+    if (loaded->theme != NULL
+        && loaded->theme->name != NULL
+        && strcmp(loaded->theme->name, server->cursor_mgr->name) != 0) {
+      const char* cursor_path = getenv("XCURSOR_PATH");
+      if (cursor_path != NULL && cursor_path[0] != '\0') {
+        wlr_log(
+            WLR_ERROR,
+            "cursor theme '%s' was not found in XCURSOR_PATH='%s'; using the wlroots built-in fallback, "
+            "which may appear small on scaled outputs (use the exact cursor theme directory name)",
+            server->cursor_mgr->name, cursor_path
+        );
+      } else {
+        wlr_log(
+            WLR_ERROR,
+            "cursor theme '%s' was not found in the default XCursor paths; using the wlroots built-in "
+            "fallback, which may appear small on scaled outputs (use the exact cursor theme directory name)",
+            server->cursor_mgr->name
+        );
+      }
+    }
+    return;
+  }
+}
+
 static bool layout_output_at(struct greeter_output* output, int layout_x, int layout_y) {
   if (output->active) {
     struct greeter_server* server = output->server;
@@ -1403,7 +1444,7 @@ static bool enable_layout_output(struct greeter_output* output, int layout_x, in
   wlr_scene_output_layout_add_output(server->scene_output_layout, output->layout_output, output->scene_output);
 
   output->active = true;
-  wlr_xcursor_manager_load(server->cursor_mgr, output->wlr_output->scale);
+  load_cursor_theme_for_scale(server, output->wlr_output->scale);
   wlr_output_schedule_frame(output->wlr_output);
   return true;
 }

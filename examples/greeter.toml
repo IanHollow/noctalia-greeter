@@ -99,6 +99,7 @@ scale = 1.5
 timeout = 300
 
 [cursor]
+# Exact, case-sensitive theme directory name (for example, Arch Breeze is breeze_cursors).
 theme = "Adwaita"
 size = 24
 # Colon-separated search path when the theme is not under the default icon dirs.
