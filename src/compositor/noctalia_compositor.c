@@ -125,7 +125,6 @@ struct greeter_output {
   struct greeter_view* view;
   bool active;
   bool render_initialized;
-  bool cleared_once;
 };
 
 struct greeter_keyboard {
@@ -1085,21 +1084,14 @@ static bool clear_enabled_output(struct greeter_output* output) {
     return false;
   }
 
-  output->cleared_once = true;
   wlr_log(WLR_INFO, "cleared output %s before disable", output->wlr_output->name);
   return true;
 }
 
-static bool commit_output_enabled(struct greeter_output* output);
-
-static bool clear_output_before_disable(struct greeter_output* output) {
+static void clear_output_before_disable(struct greeter_output* output) {
   if (output->wlr_output->enabled) {
-    return clear_enabled_output(output);
+    clear_enabled_output(output);
   }
-  if (output->cleared_once) {
-    return true;
-  }
-  return commit_output_enabled(output);
 }
 
 static void disable_output(struct greeter_output* output) {
@@ -1211,7 +1203,6 @@ static bool commit_output_enabled(struct greeter_output* output) {
     return false;
   }
 
-  output->cleared_once = true;
   wlr_log(WLR_INFO, "cleared output %s on enable", output->wlr_output->name);
   wlr_log(WLR_INFO, "output %s scale=%.2f transform=%d", output->wlr_output->name, scale, (int)transform);
   return true;
@@ -1390,8 +1381,8 @@ static void choose_outputs(struct greeter_server* server) {
     }
   }
 
-  // Release inherited scanouts first so initially disabled connectors can
-  // borrow any freed CRTCs for their one-time black frame below.
+  // Release inherited scanouts before enabling selected outputs so they can
+  // borrow any freed CRTCs.
   struct greeter_output* output;
   wl_list_for_each(output, &server->outputs, link) {
     const bool want = use_all || pinned == NULL || output == pinned;
@@ -1402,8 +1393,9 @@ static void choose_outputs(struct greeter_server* server) {
 
   wl_list_for_each(output, &server->outputs, link) {
     const bool want = use_all || pinned == NULL || output == pinned;
-    // Every connector gets an initial black frame. In particular, wlroots can
-    // import an inherited KMS scanout as enabled but inactive in our scene.
+    // Clear inherited scanouts, but leave already-disabled connectors off.
+    // Enabling one just to clear it can make a monitor report a fresh hotplug,
+    // repeatedly cycling the connector between enabled and disabled.
     if (!want) {
       disable_output(output);
     }
@@ -1439,7 +1431,9 @@ static void choose_outputs(struct greeter_server* server) {
     }
   }
 
-  if (any_output_active(server)) {
+  if (server->child_launched
+      && any_output_active(server)
+      && wlr_output_layout_output_at(server->output_layout, server->cursor->x, server->cursor->y) == NULL) {
     warp_cursor_to_initial_position(server);
   }
   schedule_launch(server);
