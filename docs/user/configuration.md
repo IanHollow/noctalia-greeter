@@ -28,6 +28,10 @@ On NixOS, use `services.displayManager.noctalia-greeter.settings` with both the 
 
 The **Synced** scheme uses a complete `[appearance.palette]` from `greeter.toml` when present, otherwise the same keys from `sync.toml`. Legacy live `appearance.json` is migrated into `sync.toml` once. See [Sync with Noctalia](sync.md) for the complete precedence and authorization model.
 
+Wallpaper configuration is independent of the selected color scheme and does
+not require an `[appearance.palette]`. A wallpaper declared in `greeter.toml`
+therefore also works with built-in schemes such as `Noctalia`.
+
 ## Keys the greeter remembers
 
 When you change the selected session or color scheme on the login screen, the greeter writes:
@@ -56,24 +60,30 @@ Set these keys in `greeter.toml`. A command-line `--session` or `--user` value t
 | `[appearance].corner_radius_scale` | Corner-radius scale for the Synced appearance |
 | `[appearance].font_family` | Fontconfig family for the Synced appearance |
 | `[appearance.palette]` | Complete Synced palette; takes precedence over Sync appearance |
-| `[appearance.wallpaper]` | Default wallpaper `path`, `fill_mode`, and `fill_color`; `fill_mode` accepts `center`, `crop`, `fit`, `stretch`, `repeat`, or `span` |
+| `[appearance.wallpaper]` | Default wallpaper `path`, `fill_mode`, and `fill_color`; `fill_color` also works without an image, and `fill_mode` accepts `center`, `crop`, `fit`, `stretch`, `repeat`, or `span` |
 | `[appearance.wallpapers.<connector>]` | Per-output wallpaper override using the same fill modes |
-| `[output].name` | Connector on which to pin the greeter |
+| `[output].name` | Connector or stable EDID identifier on which to pin the greeter |
 | `[output].layout` | Multi-monitor positions; overrides synced layout |
 | `[output].width` / `.height` | Preferred DRM mode size |
+| `[output].refresh_rate` | Preferred DRM mode refresh rate in hertz, globally or per output |
 | `[output].transforms` | Per-connector DRM transform; overrides synced transforms |
 | `[output].scales` | Per-connector scale; overrides synced scales |
 | `[output].scale` | Manual UI scale for every output |
 | `[idle].timeout` | Seconds before outputs blank; `0` disables |
 | `[cursor].theme` / `.size` / `.path` | Cursor theme |
 | `[keyboard].layout` / `.variant` / `.options` / `.numlock` | XKB keymap |
-| `[auth].allow_empty_password` | Permit empty submission for fprintd or smartcard PAM |
+| `[auth].allow_empty_password` | Permit an empty submission to start fprintd or smartcard PAM; this does not make password and fingerprint checks run in parallel |
 | `[auth].request_timeout` | Seconds to wait for each greetd reply (`0`–`3600`, default `60`); `0` disables the watchdog |
 
 Display and input settings have task-oriented guides:
 
 - [Displays](displays.md): connectors, layout, mode, transforms, scale, and idle blanking
 - [Keyboard and cursor](input.md): navigation, XKB, Num Lock, and cursor themes
+
+PAM handles authentication methods in the order configured by the system. In
+particular, `pam_fprintd` cannot accept a password while it is waiting for a
+fingerprint. See [Fingerprint blocks password login](troubleshooting.md#fingerprint-blocks-password-login)
+for the limitation and configuration options.
 
 ## Default session
 

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "compositor/system_keyboard_config.h"
 #include "greeter/greeter_config_io.h"
 
 #include <ctype.h>
@@ -125,7 +126,6 @@ struct greeter_output {
   struct greeter_view* view;
   bool active;
   bool render_initialized;
-  bool cleared_once;
 };
 
 struct greeter_keyboard {
@@ -174,6 +174,11 @@ struct greeter_output_scale {
   float scale;
 };
 
+struct greeter_output_refresh_rate {
+  char identifier[512];
+  int refresh_mhz;
+};
+
 struct greeter_server {
   struct wl_display* display;
   struct wlr_backend* backend;
@@ -212,14 +217,17 @@ struct greeter_server {
   bool child_launched;
   int child_argc;
   char** child_argv_ptr;
-  char preferred_output[128];
+  char preferred_output[512];
   float manual_scale;
   int manual_mode_width;
   int manual_mode_height;
+  int manual_mode_refresh_mhz;
   struct greeter_output_transform output_transforms[16];
   size_t output_transform_count;
   struct greeter_output_scale output_scales[16];
   size_t output_scale_count;
+  struct greeter_output_refresh_rate output_refresh_rates[16];
+  size_t output_refresh_rate_count;
   int idle_timeout_sec;
   struct timespec last_activity;
   int idle_timerfd;
@@ -553,13 +561,59 @@ static void parse_output_scales_value(struct greeter_server* server, char* value
   }
 }
 
+static bool parse_output_refresh_rate_entry(char* token, struct greeter_output_refresh_rate* out) {
+  char* colon = strrchr(token, ':');
+  if (colon == NULL || colon == token) {
+    return false;
+  }
+  *colon = '\0';
+  char* identifier = trim(token);
+  char* refresh_raw = trim(colon + 1);
+  if (identifier[0] == '\0' || refresh_raw[0] == '\0') {
+    return false;
+  }
+
+  char* end = NULL;
+  const float refresh_hz = strtof(refresh_raw, &end);
+  if (end == refresh_raw || *end != '\0' || !(refresh_hz > 0.0f && refresh_hz <= 1000.0f)) {
+    return false;
+  }
+  snprintf(out->identifier, sizeof(out->identifier), "%s", identifier);
+  out->refresh_mhz = (int)(refresh_hz * 1000.0f + 0.5f);
+  return true;
+}
+
+static void parse_output_refresh_rate_map(struct greeter_server* server, char* value) {
+  server->output_refresh_rate_count = 0;
+  char* saveptr = NULL;
+  for (char* token = strtok_r(value, ";", &saveptr); token != NULL; token = strtok_r(NULL, ";", &saveptr)) {
+    if (server->output_refresh_rate_count
+        >= sizeof(server->output_refresh_rates) / sizeof(server->output_refresh_rates[0])) {
+      wlr_log(
+          WLR_ERROR, "output.refresh_rate: too many entries (max %zu)",
+          sizeof(server->output_refresh_rates) / sizeof(server->output_refresh_rates[0])
+      );
+      break;
+    }
+    struct greeter_output_refresh_rate entry;
+    if (!parse_output_refresh_rate_entry(token, &entry)) {
+      wlr_log(WLR_ERROR, "output.refresh_rate: invalid entry '%s' (use IDENTIFIER:120)", token);
+      continue;
+    }
+    server->output_refresh_rates[server->output_refresh_rate_count++] = entry;
+    wlr_log(WLR_INFO, "output refresh rate: %s -> %.3f Hz", entry.identifier, entry.refresh_mhz / 1000.0);
+  }
+}
+
 static void read_greeter_config(struct greeter_server* server) {
   server->preferred_output[0] = '\0';
   server->manual_scale = 0.0f;
   server->manual_mode_width = 0;
   server->manual_mode_height = 0;
+  server->manual_mode_refresh_mhz = 0;
   server->output_transform_count = 0;
   server->output_scale_count = 0;
+  server->output_refresh_rate_count = 0;
   server->idle_timeout_sec = 0;
   server->cursor_theme[0] = '\0';
   server->cursor_size = 0;
@@ -584,6 +638,9 @@ static void read_greeter_config(struct greeter_server* server) {
   }
   if (config.manual_mode_height > 0) {
     server->manual_mode_height = config.manual_mode_height;
+  }
+  if (config.manual_mode_refresh_mhz > 0) {
+    server->manual_mode_refresh_mhz = config.manual_mode_refresh_mhz;
   }
   if (config.idle_timeout_sec > 0) {
     server->idle_timeout_sec = config.idle_timeout_sec;
@@ -644,10 +701,51 @@ static void read_greeter_config(struct greeter_server* server) {
     snprintf(scales, sizeof(scales), "%s", config.output_scales);
     parse_output_scales_value(server, scales);
   }
+  if (config.output_refresh_rate_map[0] != '\0') {
+    char refresh_rate_map[4096];
+    snprintf(refresh_rate_map, sizeof(refresh_rate_map), "%s", config.output_refresh_rate_map);
+    parse_output_refresh_rate_map(server, refresh_rate_map);
+  }
 }
 
 static struct xkb_keymap* compose_keyboard_keymap(struct xkb_context* context, const struct greeter_server* server) {
   if (server->keyboard_layout[0] == '\0') {
+    const char* environment_layout = getenv("XKB_DEFAULT_LAYOUT");
+    if (environment_layout != NULL && environment_layout[0] != '\0') {
+      wlr_log(WLR_INFO, "keyboard: using XKB_DEFAULT_* environment configuration");
+      return xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    }
+
+    struct system_keyboard_config system_config;
+    char source_path[PATH_MAX];
+    if (system_keyboard_config_load(&system_config, source_path, sizeof(source_path))) {
+      const char* environment_model = getenv("XKB_DEFAULT_MODEL");
+      const char* environment_variant = getenv("XKB_DEFAULT_VARIANT");
+      const char* environment_options = getenv("XKB_DEFAULT_OPTIONS");
+      struct xkb_rule_names system_names = {0};
+      system_names.model = environment_model != NULL && environment_model[0] != '\0'
+          ? environment_model
+          : (system_config.model[0] != '\0' ? system_config.model : NULL);
+      system_names.layout = system_config.layout;
+      system_names.variant = environment_variant != NULL && environment_variant[0] != '\0'
+          ? environment_variant
+          : (system_config.variant[0] != '\0' ? system_config.variant : NULL);
+      system_names.options = environment_options != NULL && environment_options[0] != '\0'
+          ? environment_options
+          : (system_config.options[0] != '\0' ? system_config.options : NULL);
+      struct xkb_keymap* system_keymap = xkb_keymap_new_from_names(context, &system_names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+      if (system_keymap != NULL) {
+        wlr_log(
+            WLR_INFO, "keyboard: loaded system XKB config from %s (model=%s layout=%s variant=%s options=%s)",
+            source_path, system_names.model != NULL ? system_names.model : "(default)", system_names.layout,
+            system_names.variant != NULL ? system_names.variant : "(default)",
+            system_names.options != NULL ? system_names.options : "(none)"
+        );
+        return system_keymap;
+      }
+      wlr_log(WLR_ERROR, "keyboard: failed to compile system XKB config from %s", source_path);
+    }
+
     return xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
   }
 
@@ -685,6 +783,73 @@ notify_surface_scale(struct greeter_server* server, struct wlr_surface* surface,
 }
 
 static bool use_all_outputs(const struct greeter_server* server) { return server->preferred_output[0] == '\0'; }
+
+static void append_output_identifier_component(char* identifier, size_t size, const char* component) {
+  if (component == NULL || component[0] == '\0') {
+    return;
+  }
+  const size_t length = strlen(identifier);
+  if (length >= size - 1) {
+    return;
+  }
+  snprintf(identifier + length, size - length, "%s%s", length > 0 ? " " : "", component);
+}
+
+static void output_stable_identifier(const struct wlr_output* output, char* identifier, size_t size) {
+  identifier[0] = '\0';
+  append_output_identifier_component(identifier, size, output->make);
+  append_output_identifier_component(identifier, size, output->model);
+  append_output_identifier_component(identifier, size, output->serial);
+}
+
+static bool output_matches_identifier(const struct wlr_output* output, const char* identifier) {
+  if (strcmp(output->name, identifier) == 0) {
+    return true;
+  }
+
+  char stable[512];
+  output_stable_identifier(output, stable, sizeof(stable));
+  if (stable[0] != '\0' && strcmp(stable, identifier) == 0) {
+    return true;
+  }
+  if (output->description == NULL) {
+    return false;
+  }
+  if (strcmp(output->description, identifier) == 0) {
+    return true;
+  }
+
+  // wlroots descriptions conventionally append the volatile connector as
+  // " (DP-1)". Accept the stable prefix as an identifier as well.
+  char suffix[512];
+  snprintf(suffix, sizeof(suffix), " (%s)", output->name);
+  const size_t description_length = strlen(output->description);
+  const size_t suffix_length = strlen(suffix);
+  const size_t identifier_length = strlen(identifier);
+  return description_length > suffix_length
+      && identifier_length == description_length - suffix_length
+      && strcmp(output->description + description_length - suffix_length, suffix) == 0
+      && strncmp(output->description, identifier, identifier_length) == 0;
+}
+
+static struct greeter_output* output_by_identifier(struct greeter_server* server, const char* identifier) {
+  struct greeter_output* output;
+  wl_list_for_each(output, &server->outputs, link) {
+    if (output_matches_identifier(output->wlr_output, identifier)) {
+      return output;
+    }
+  }
+  return NULL;
+}
+
+static int output_refresh_rate(const struct greeter_server* server, const struct wlr_output* output) {
+  for (size_t i = 0; i < server->output_refresh_rate_count; ++i) {
+    if (output_matches_identifier(output, server->output_refresh_rates[i].identifier)) {
+      return server->output_refresh_rates[i].refresh_mhz;
+    }
+  }
+  return server->manual_mode_refresh_mhz;
+}
 
 static struct greeter_output* output_by_name(struct greeter_server* server, const char* name) {
   struct greeter_output* output;
@@ -1085,21 +1250,14 @@ static bool clear_enabled_output(struct greeter_output* output) {
     return false;
   }
 
-  output->cleared_once = true;
   wlr_log(WLR_INFO, "cleared output %s before disable", output->wlr_output->name);
   return true;
 }
 
-static bool commit_output_enabled(struct greeter_output* output);
-
-static bool clear_output_before_disable(struct greeter_output* output) {
+static void clear_output_before_disable(struct greeter_output* output) {
   if (output->wlr_output->enabled) {
-    return clear_enabled_output(output);
+    clear_enabled_output(output);
   }
-  if (output->cleared_once) {
-    return true;
-  }
-  return commit_output_enabled(output);
 }
 
 static void disable_output(struct greeter_output* output) {
@@ -1141,21 +1299,49 @@ static void disable_output(struct greeter_output* output) {
   }
 }
 
-static struct wlr_output_mode* select_output_mode(struct wlr_output* wlr_output, int manual_width, int manual_height) {
+static struct wlr_output_mode*
+select_mode_at_size(struct wlr_output* wlr_output, int width, int height, int refresh_mhz) {
+  struct wlr_output_mode* highest = NULL;
+  struct wlr_output_mode* closest = NULL;
+  int64_t closest_delta = INT64_MAX;
+  struct wlr_output_mode* mode;
+  wl_list_for_each(mode, &wlr_output->modes, link) {
+    if (mode->width != width || mode->height != height) {
+      continue;
+    }
+    if (highest == NULL || mode->refresh > highest->refresh) {
+      highest = mode;
+    }
+    if (refresh_mhz > 0) {
+      const int64_t delta = llabs((int64_t)mode->refresh - refresh_mhz);
+      if (closest == NULL || delta < closest_delta) {
+        closest = mode;
+        closest_delta = delta;
+      }
+    }
+  }
+
+  // DRM modes commonly advertise fractional rates such as 119.998 Hz. Treat
+  // values within 1 Hz as the configured nominal refresh rate.
+  if (closest != NULL && closest_delta <= 1000) {
+    return closest;
+  }
+  if (refresh_mhz > 0 && highest != NULL) {
+    wlr_log(
+        WLR_INFO, "no mode %dx%d near %.3f Hz for %s; using highest refresh %.3f Hz", width, height,
+        refresh_mhz / 1000.0, wlr_output->name, highest->refresh / 1000.0
+    );
+  }
+  return highest;
+}
+
+static struct wlr_output_mode*
+select_output_mode(struct wlr_output* wlr_output, int manual_width, int manual_height, int refresh_mhz) {
   if ((manual_width > 0) != (manual_height > 0)) {
     wlr_log(WLR_INFO, "output width/height require both values; ignoring partial manual mode for %s", wlr_output->name);
   }
   if (manual_width > 0 && manual_height > 0) {
-    struct wlr_output_mode* best = NULL;
-    struct wlr_output_mode* mode;
-    wl_list_for_each(mode, &wlr_output->modes, link) {
-      if (mode->width != manual_width || mode->height != manual_height) {
-        continue;
-      }
-      if (best == NULL || mode->refresh > best->refresh) {
-        best = mode;
-      }
-    }
+    struct wlr_output_mode* best = select_mode_at_size(wlr_output, manual_width, manual_height, refresh_mhz);
     if (best != NULL) {
       return best;
     }
@@ -1167,19 +1353,14 @@ static struct wlr_output_mode* select_output_mode(struct wlr_output* wlr_output,
     return NULL;
   }
 
-  // EDID may list several refresh rates at the preferred resolution; pick the
-  // highest among those matching the preferred mode's size.
-  struct wlr_output_mode* best = preferred;
-  struct wlr_output_mode* mode;
-  wl_list_for_each(mode, &wlr_output->modes, link) {
-    if (mode->width != preferred->width || mode->height != preferred->height) {
-      continue;
-    }
-    if (mode->refresh > best->refresh) {
-      best = mode;
-    }
+  // Preserve the complete EDID-preferred mode by default. Choosing a higher
+  // refresh at the same resolution can exceed a dock or MST link's bandwidth.
+  if (refresh_mhz <= 0) {
+    return preferred;
   }
-  return best;
+
+  // An explicit refresh-rate override applies at the preferred resolution.
+  return select_mode_at_size(wlr_output, preferred->width, preferred->height, refresh_mhz);
 }
 
 static bool commit_output_enabled(struct greeter_output* output) {
@@ -1191,8 +1372,9 @@ static bool commit_output_enabled(struct greeter_output* output) {
   struct wlr_output_state state;
   wlr_output_state_init(&state);
   wlr_output_state_set_enabled(&state, true);
+  const int refresh_mhz = output_refresh_rate(server, output->wlr_output);
   struct wlr_output_mode* mode =
-      select_output_mode(output->wlr_output, server->manual_mode_width, server->manual_mode_height);
+      select_output_mode(output->wlr_output, server->manual_mode_width, server->manual_mode_height, refresh_mhz);
   if (mode != NULL) {
     wlr_output_state_set_mode(&state, mode);
     wlr_log(WLR_INFO, "selected output mode: %dx%d @ %.3f Hz", mode->width, mode->height, mode->refresh / 1000.0);
@@ -1211,13 +1393,53 @@ static bool commit_output_enabled(struct greeter_output* output) {
     return false;
   }
 
-  output->cleared_once = true;
   wlr_log(WLR_INFO, "cleared output %s on enable", output->wlr_output->name);
   wlr_log(WLR_INFO, "output %s scale=%.2f transform=%d", output->wlr_output->name, scale, (int)transform);
   return true;
 }
 
 static bool enable_layout_output(struct greeter_output* output, int layout_x, int layout_y);
+
+static void load_cursor_theme_for_scale(struct greeter_server* server, float scale) {
+  if (!wlr_xcursor_manager_load(server->cursor_mgr, scale)) {
+    wlr_log(WLR_ERROR, "failed to load cursor theme at scale %.2f", scale);
+    return;
+  }
+
+  if (server->cursor_mgr->name == NULL) {
+    return;
+  }
+
+  struct wlr_xcursor_manager_theme* loaded;
+  wl_list_for_each(loaded, &server->cursor_mgr->scaled_themes, link) {
+    if (loaded->scale != scale) {
+      continue;
+    }
+    // wlroots renames the loaded theme to "default" when it silently falls
+    // back to its built-in cursor data.
+    if (loaded->theme != NULL
+        && loaded->theme->name != NULL
+        && strcmp(loaded->theme->name, server->cursor_mgr->name) != 0) {
+      const char* cursor_path = getenv("XCURSOR_PATH");
+      if (cursor_path != NULL && cursor_path[0] != '\0') {
+        wlr_log(
+            WLR_ERROR,
+            "cursor theme '%s' was not found in XCURSOR_PATH='%s'; using the wlroots built-in fallback, "
+            "which may appear small on scaled outputs (use the exact cursor theme directory name)",
+            server->cursor_mgr->name, cursor_path
+        );
+      } else {
+        wlr_log(
+            WLR_ERROR,
+            "cursor theme '%s' was not found in the default XCursor paths; using the wlroots built-in "
+            "fallback, which may appear small on scaled outputs (use the exact cursor theme directory name)",
+            server->cursor_mgr->name
+        );
+      }
+    }
+    return;
+  }
+}
 
 static bool layout_output_at(struct greeter_output* output, int layout_x, int layout_y) {
   if (output->active) {
@@ -1264,7 +1486,7 @@ static bool enable_layout_output(struct greeter_output* output, int layout_x, in
   wlr_scene_output_layout_add_output(server->scene_output_layout, output->layout_output, output->scene_output);
 
   output->active = true;
-  wlr_xcursor_manager_load(server->cursor_mgr, output->wlr_output->scale);
+  load_cursor_theme_for_scale(server, output->wlr_output->scale);
   wlr_output_schedule_frame(output->wlr_output);
   return true;
 }
@@ -1288,7 +1510,7 @@ static void warp_cursor_to_output_center(struct greeter_server* server, struct g
 
 static void warp_cursor_to_initial_position(struct greeter_server* server) {
   if (!use_all_outputs(server)) {
-    struct greeter_output* pinned = output_by_name(server, server->preferred_output);
+    struct greeter_output* pinned = output_by_identifier(server, server->preferred_output);
     if (pinned != NULL && pinned->active) {
       warp_cursor_to_output_center(server, pinned);
       return;
@@ -1383,15 +1605,15 @@ static void choose_outputs(struct greeter_server* server) {
   bool use_all = use_all_outputs(server);
   struct greeter_output* pinned = NULL;
   if (!use_all) {
-    pinned = output_by_name(server, server->preferred_output);
+    pinned = output_by_identifier(server, server->preferred_output);
     if (pinned == NULL) {
       wlr_log(WLR_INFO, "output '%s' not connected; using all outputs", server->preferred_output);
       use_all = true;
     }
   }
 
-  // Release inherited scanouts first so initially disabled connectors can
-  // borrow any freed CRTCs for their one-time black frame below.
+  // Release inherited scanouts before enabling selected outputs so they can
+  // borrow any freed CRTCs.
   struct greeter_output* output;
   wl_list_for_each(output, &server->outputs, link) {
     const bool want = use_all || pinned == NULL || output == pinned;
@@ -1402,8 +1624,9 @@ static void choose_outputs(struct greeter_server* server) {
 
   wl_list_for_each(output, &server->outputs, link) {
     const bool want = use_all || pinned == NULL || output == pinned;
-    // Every connector gets an initial black frame. In particular, wlroots can
-    // import an inherited KMS scanout as enabled but inactive in our scene.
+    // Clear inherited scanouts, but leave already-disabled connectors off.
+    // Enabling one just to clear it can make a monitor report a fresh hotplug,
+    // repeatedly cycling the connector between enabled and disabled.
     if (!want) {
       disable_output(output);
     }
@@ -1433,13 +1656,19 @@ static void choose_outputs(struct greeter_server* server) {
     wlr_log(WLR_INFO, "greeter pinned output: %s", pinned->wlr_output->name);
   }
 
+  // Mapping also lets wlroots apply the output transform to absolute input
+  // events before they reach the cursor listeners. Re-evaluate on hotplug.
+  wlr_cursor_map_to_output(server->cursor, pinned != NULL && pinned->active ? pinned->wlr_output : NULL);
+
   wl_list_for_each(output, &server->outputs, link) {
     if (output->view != NULL && output->view->mapped) {
       configure_view(output->view);
     }
   }
 
-  if (any_output_active(server)) {
+  if (server->child_launched
+      && any_output_active(server)
+      && wlr_output_layout_output_at(server->output_layout, server->cursor->x, server->cursor->y) == NULL) {
     warp_cursor_to_initial_position(server);
   }
   schedule_launch(server);

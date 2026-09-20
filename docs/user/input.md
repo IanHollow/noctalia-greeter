@@ -26,6 +26,7 @@ The greeter works without a mouse.
 | `Enter` | Submit the password, activate a control, or confirm a menu item |
 | `Space` | Activate the focused control |
 | `Esc` | Close a menu or return from the password step to the user list |
+| `Ctrl+U` | Delete the selection or everything left of the cursor in a text field |
 | `F3` | Open the session picker |
 | `F7` | Open the color scheme picker |
 | `Ctrl+Alt+F1`–`F12` | Switch to a virtual terminal (TTY) |
@@ -37,8 +38,28 @@ The greeter works without a mouse.
 The compositor loads its XKB keymap in this order:
 
 1. `[keyboard].layout`, `[keyboard].variant`, and `[keyboard].options` in `greeter.toml`
-2. `XKB_DEFAULT_LAYOUT`, `XKB_DEFAULT_VARIANT`, and `XKB_DEFAULT_OPTIONS` from the session environment
-3. The system default keymap
+2. `XKB_DEFAULT_MODEL`, `XKB_DEFAULT_LAYOUT`, `XKB_DEFAULT_VARIANT`, and `XKB_DEFAULT_OPTIONS` from the session environment
+3. XKB settings discovered from common system configuration files
+4. The xkbcommon default keymap
+
+System discovery does not depend on a particular distribution or init system.
+The compositor recognizes `XKBMODEL`, `XKBLAYOUT`, `XKBVARIANT`, and
+`XKBOPTIONS` assignments (including their underscore-separated forms) in
+`/etc/default/keyboard`, `/etc/vconsole.conf`, and `/etc/sysconfig/keyboard`.
+It also recognizes standard `XkbModel`, `XkbLayout`, `XkbVariant`, and
+`XkbOptions` entries in the usual system Xorg configuration and
+`xorg.conf.d` locations under `/etc`, `/usr/local/share`, and `/usr/share`.
+These files are parsed as data and are never executed.
+
+A console-only `KEYMAP` value is not used because console keymap names cannot
+be mapped reliably to XKB layouts across distributions. Systems that only store
+a console keymap should provide one of the XKB forms above or use
+`greeter.toml`.
+
+Terminal greeters such as `tuigreet` receive input through the virtual
+terminal's kernel keymap. Noctalia Greeter is a Wayland compositor and receives
+raw input events instead, so it needs an XKB configuration from one of the
+sources above.
 
 Set the layout in `/var/lib/noctalia-greeter/greeter.toml`:
 
@@ -100,6 +121,22 @@ theme = "Adwaita"
 size = 24
 ```
 
+`theme` must be the exact, case-sensitive name of the directory that directly
+contains the theme's `cursors/` directory. It is not necessarily the name shown
+by desktop appearance settings. For example, Arch Linux installs the Breeze
+cursor theme as `breeze_cursors`, not `Breeze`:
+
+```toml
+[cursor]
+theme = "breeze_cursors"
+size = 24
+```
+
+Install the matching system package first (`breeze-cursors` for that example,
+or `adwaita-cursors` for `Adwaita` on Arch Linux). To inspect installed names,
+find `cursors` directories under `/usr/share/icons`; use the name of their
+parent directory.
+
 If the theme is outside the default icon search paths, set the directory that contains it:
 
 ```toml
@@ -110,6 +147,10 @@ path = "/usr/share/icons"
 ```
 
 The path must be readable by the greetd session user. A cursor theme installed only in your personal home directory is normally unavailable to the greeter.
+
+If the named theme cannot be loaded, wlroots uses its built-in fallback. That
+fallback looks like a default cursor and can appear too small on scaled outputs;
+the compositor logs an error identifying the missing theme.
 
 ### Environment variables
 

@@ -288,6 +288,7 @@ install_data(
 executable('noctalia-greeter-compositor',
   sources: files(
     'src/compositor/noctalia_compositor.c',
+    'src/compositor/system_keyboard_config.c',
     'src/core/log.cpp',
     'src/greeter/greeter_config_io.cpp',
   ),
@@ -344,7 +345,11 @@ test(
 
 legacy_staging_compatibility_test = executable(
   'legacy-staging-compatibility-test',
-  sources: _apply_appearance_support_sources + files('tests/legacy_staging_compatibility_test.cpp'),
+  sources: _apply_appearance_support_sources + files(
+    'src/greeter/appearance_config.cpp',
+    'src/render/core/color.cpp',
+    'tests/legacy_staging_compatibility_test.cpp',
+  ),
   dependencies: [nlohmann_dep, tomlplusplus_dep],
   include_directories: _greeter_tools_inc,
   cpp_args: [
@@ -365,6 +370,19 @@ wallpaper_span_geometry_test = executable(
 )
 
 test('wallpaper-span-geometry', wallpaper_span_geometry_test)
+
+system_keyboard_config_test = executable(
+  'system-keyboard-config-test',
+  sources: files(
+    'tests/system_keyboard_config_test.c',
+    'src/compositor/system_keyboard_config.c',
+  ),
+  include_directories: include_directories('src'),
+  c_args: ['-Wall', '-Wextra', '-Wpedantic', '-Wconversion'],
+  build_by_default: false,
+)
+
+test('system-keyboard-config', system_keyboard_config_test)
 
 session_discovery_test = executable(
   'session-discovery-test',

@@ -203,6 +203,37 @@ namespace {
   }
 } // namespace
 
+std::string WaylandOutputInfo::stableIdentifier() const {
+  if (!description.empty()) {
+    const std::string connectorSuffix = " (" + name + ")";
+    if (!name.empty() && description.ends_with(connectorSuffix)) {
+      return description.substr(0, description.size() - connectorSuffix.size());
+    }
+    if (description != name) {
+      return description;
+    }
+  }
+
+  std::string identifier;
+  for (const std::string* component : {&make, &model}) {
+    if (component->empty()) {
+      continue;
+    }
+    if (!identifier.empty()) {
+      identifier += ' ';
+    }
+    identifier += *component;
+  }
+  return identifier;
+}
+
+bool WaylandOutputInfo::matchesIdentifier(const std::string_view identifier) const {
+  if (identifier.empty()) {
+    return false;
+  }
+  return name == identifier || description == identifier || stableIdentifier() == identifier;
+}
+
 WaylandClient::WaylandClient() = default;
 
 WaylandClient::~WaylandClient() { disconnect(); }
@@ -351,7 +382,7 @@ const WaylandOutputInfo* WaylandClient::findOutputByName(const std::string_view 
     return nullptr;
   }
   for (const auto& out : m_outputs) {
-    if (out.done && out.name == name) {
+    if (out.done && out.matchesIdentifier(name)) {
       return &out;
     }
   }
@@ -750,7 +781,7 @@ void WaylandClient::notifyOutputsChanged() {
 
 void WaylandClient::handleOutputGeometry(
     void* data, wl_output* wlOut, std::int32_t x, std::int32_t y, std::int32_t physWidth, std::int32_t physHeight,
-    std::int32_t /*subpixel*/, const char* /*make*/, const char* /*model*/, std::int32_t transform
+    std::int32_t /*subpixel*/, const char* make, const char* model, std::int32_t transform
 ) {
   auto* client = static_cast<WaylandClient*>(data);
   for (auto& out : client->m_outputs) {
@@ -761,11 +792,15 @@ void WaylandClient::handleOutputGeometry(
         || out.y != y
         || out.physicalWidthMm != physWidth
         || out.physicalHeightMm != physHeight
+        || out.make != (make != nullptr ? make : "")
+        || out.model != (model != nullptr ? model : "")
         || out.transform != transform;
     out.x = x;
     out.y = y;
     out.physicalWidthMm = physWidth;
     out.physicalHeightMm = physHeight;
+    out.make = make != nullptr ? make : "";
+    out.model = model != nullptr ? model : "";
     out.transform = transform;
     if (changed && out.done) {
       client->notifyOutputsChanged();
@@ -839,7 +874,22 @@ void WaylandClient::handleOutputName(void* data, wl_output* wlOut, const char* n
   }
 }
 
-void WaylandClient::handleOutputDescription(void* /*data*/, wl_output* /*output*/, const char* /*description*/) {}
+void WaylandClient::handleOutputDescription(void* data, wl_output* wlOut, const char* description) {
+  auto* client = static_cast<WaylandClient*>(data);
+  for (auto& out : client->m_outputs) {
+    if (out.output != wlOut) {
+      continue;
+    }
+    const std::string next = description != nullptr ? description : "";
+    if (out.description != next) {
+      out.description = next;
+      if (out.done) {
+        client->notifyOutputsChanged();
+      }
+    }
+    break;
+  }
+}
 
 void WaylandClient::bindOutput(wl_registry* registry, std::uint32_t name, std::uint32_t version) {
   const std::uint32_t bindVersion = std::min(version, 4u);

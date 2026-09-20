@@ -17,31 +17,27 @@ struct GreeterOutputWallpaper {
   Color fillColor = rgba(0.0f, 0.0f, 0.0f, 0.0f);
 };
 
-struct GreeterSyncedAppearance {
-  Palette palette{};
-  std::string themeMode;
-  std::string wallpaperPath;
-  WallpaperFillMode wallpaperFillMode = WallpaperFillMode::Crop;
-  Color wallpaperFillColor = rgba(0.0f, 0.0f, 0.0f, 0.0f);
-  // connector name -> wallpaper (from appearance.json "wallpapers")
+struct GreeterWallpaperAppearance {
+  std::optional<GreeterOutputWallpaper> wallpaper;
   std::unordered_map<std::string, GreeterOutputWallpaper> wallpapersByOutput;
-  float cornerRadiusScale = 1.0f;
-  // From appearance.json "font_family"; empty means leave the greeter default.
-  std::string fontFamily;
 
-  [[nodiscard]] GreeterOutputWallpaper wallpaperForOutput(std::string_view outputName) const {
+  [[nodiscard]] std::optional<GreeterOutputWallpaper> wallpaperForOutput(std::string_view outputName) const {
     if (!outputName.empty()) {
       const auto it = wallpapersByOutput.find(std::string(outputName));
-      if (it != wallpapersByOutput.end() && !it->second.path.empty()) {
+      if (it != wallpapersByOutput.end()) {
         return it->second;
       }
     }
-    GreeterOutputWallpaper fallback;
-    fallback.path = wallpaperPath;
-    fallback.fillMode = wallpaperFillMode;
-    fallback.fillColor = wallpaperFillColor;
-    return fallback;
+    return wallpaper;
   }
+};
+
+struct GreeterSyncedAppearance {
+  Palette palette{};
+  std::string themeMode;
+  float cornerRadiusScale = 1.0f;
+  // From appearance.json "font_family"; empty means leave the greeter default.
+  std::string fontFamily;
 };
 
 // Legacy Sync appearance.json path; used only for the one-shot migration into sync.toml.
@@ -51,3 +47,7 @@ struct GreeterSyncedAppearance {
 // complete), else sync.toml [appearance] (Sync-owned, if its palette is complete), else the
 // legacy live appearance.json — migrated into sync.toml once when found.
 [[nodiscard]] std::optional<GreeterSyncedAppearance> loadGreeterSyncedAppearance();
+
+// Wallpaper source is independent of the selected color scheme. Declarative
+// greeter.toml values override matching Sync-owned sync.toml values.
+[[nodiscard]] std::optional<GreeterWallpaperAppearance> loadGreeterWallpaperAppearance();

@@ -1,3 +1,4 @@
+#include "greeter/appearance_config.h"
 #include "greeter/appearance_sync.h"
 #include "greeter/greeter_config_io.h"
 #include "tools/secure_appearance_sync.h"
@@ -5,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -64,6 +66,32 @@ namespace {
     std::filesystem::path runtimeDirectory;
     std::filesystem::path stagingDirectory;
     std::filesystem::path syncFile;
+  };
+
+  class ScopedStateDirectory {
+  public:
+    explicit ScopedStateDirectory(const std::filesystem::path& path) {
+      if (const char* current = std::getenv(greeter::appearance::kSyncedDataDirEnv)) {
+        previous = current;
+      }
+      if (::setenv(greeter::appearance::kSyncedDataDirEnv, path.c_str(), 1) != 0) {
+        throw std::runtime_error("setenv failed");
+      }
+    }
+
+    ~ScopedStateDirectory() {
+      if (previous.has_value()) {
+        ::setenv(greeter::appearance::kSyncedDataDirEnv, previous->c_str(), 1);
+      } else {
+        ::unsetenv(greeter::appearance::kSyncedDataDirEnv);
+      }
+    }
+
+    ScopedStateDirectory(const ScopedStateDirectory&) = delete;
+    ScopedStateDirectory& operator=(const ScopedStateDirectory&) = delete;
+
+  private:
+    std::optional<std::string> previous;
   };
 
   [[nodiscard]] bool validate(
@@ -154,6 +182,85 @@ int main() {
     expectFillMode("repeat fill mode", "repeat", WallpaperFillMode::Repeat, passed);
     expectFillMode("span fill mode", "span", WallpaperFillMode::Span, passed);
     expectFillMode("invalid fill mode", "tile", std::nullopt, passed);
+
+    {
+      Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[appearance]
+scheme = "Noctalia"
+
+[appearance.wallpaper]
+path = "/nix/store/example-wallpaper.png"
+fill_mode = "center"
+)toml";
+
+      const ScopedStateDirectory stateDirectory(fixture.runtimeDirectory);
+      const auto appearance = loadGreeterWallpaperAppearance();
+      const auto wallpaper = appearance.has_value() ? appearance->wallpaperForOutput("") : std::nullopt;
+      expect("wallpaper loads without synced palette", wallpaper.has_value(), true, {}, passed);
+      expect(
+          "wallpaper path loads without synced palette",
+          wallpaper.has_value() && wallpaper->path == "/nix/store/example-wallpaper.png", true, {}, passed
+      );
+      expect(
+          "wallpaper mode loads without synced palette",
+          wallpaper.has_value() && wallpaper->fillMode == WallpaperFillMode::Center, true, {}, passed
+      );
+    }
+
+    {
+      Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[appearance]
+scheme = "Noctalia"
+
+[appearance.wallpaper]
+fill_color = "#ff0000"
+)toml";
+
+      const ScopedStateDirectory stateDirectory(fixture.runtimeDirectory);
+      const auto appearance = loadGreeterWallpaperAppearance();
+      const auto wallpaper = appearance.has_value() ? appearance->wallpaperForOutput("") : std::nullopt;
+      const bool isRed = wallpaper.has_value() && wallpaper->path.empty() && wallpaper->fillColor == rgbHex(0xff0000);
+      expect("fill-only wallpaper loads without synced palette", isRed, true, {}, passed);
+    }
+
+    {
+      Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[output]
+name = "Acer Technologies XV242Y TL1EE0018521"
+width = 1920
+height = 1080
+refresh_rate = 120
+)toml";
+
+      greeter_compositor_config config{};
+      greeter_compositor_config_load(fixture.runtimeDirectory.c_str(), &config);
+      expect(
+          "stable output identifier parses",
+          std::string_view(config.preferred_output) == "Acer Technologies XV242Y TL1EE0018521", true, {}, passed
+      );
+      expect("output width parses", config.manual_mode_width == 1920, true, {}, passed);
+      expect("output height parses", config.manual_mode_height == 1080, true, {}, passed);
+      expect("output refresh rate parses", config.manual_mode_refresh_mhz == 120000, true, {}, passed);
+    }
+
+    {
+      Fixture fixture(0700, 0600);
+      std::ofstream(fixture.runtimeDirectory / "greeter.toml") << R"toml(
+[output]
+refresh_rate = "DP-1:120; HDMI-A-1:60"
+)toml";
+
+      greeter_compositor_config config{};
+      greeter_compositor_config_load(fixture.runtimeDirectory.c_str(), &config);
+      expect(
+          "per-output refresh rates parse", std::string_view(config.output_refresh_rate_map) == "DP-1:120; HDMI-A-1:60",
+          true, {}, passed
+      );
+      expect("refresh map is not a global rate", config.manual_mode_refresh_mhz == 0, true, {}, passed);
+    }
 
     {
       Fixture fixture(0700, 0600);

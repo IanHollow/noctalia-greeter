@@ -57,11 +57,13 @@ hover = "#9BFECE"
 on_hover = "#0e0e43"
 
 [appearance.wallpaper]
+# Applied independently of scheme/palette selection.
 # Absolute path, or color:#RRGGBB.
 # fill_mode: center | crop | fit | stretch | repeat | span
 # span projects one image across the logical multi-monitor layout; with one pinned output it behaves like crop.
 path = "/var/lib/noctalia-greeter/wallpaper.webp"
 fill_mode = "crop"
+# May also be used without path for a solid background.
 # fill_color = "#070722"
 
 # Optional per-connector wallpapers (overrides [appearance.wallpaper] for that output):
@@ -70,14 +72,19 @@ fill_mode = "crop"
 # fill_mode = "crop"
 
 [output]
-# Pin the greeter to one connector; omit to mirror on every monitor.
-# List names with: noctalia-greeter outputs
+# Pin the greeter to one connector or stable EDID identifier; omit to mirror on every monitor.
+# List both with: noctalia-greeter outputs --details
 name = "DP-2"
+# name = "Acer Technologies XV242Y TL1EE0018521"
 # Multi-monitor positions (logical pixels). Overrides Sync layout in sync.toml when set.
 layout = "DP-1:0,0; DP-2:2560,0"
 # Preferred DRM mode size in pixels (both required if set).
 width = 5120
 height = 2160
+# Preferred refresh rate in Hz; nominal values match fractional modes within 1 Hz.
+refresh_rate = 120
+# Or configure different rates per output (use one form or the other).
+# refresh_rate = "DP-1:120; HDMI-A-1:60"
 # Per-connector DRM transform. Overrides Sync transforms in sync.toml when set.
 # Tokens: normal/0/none, 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
 transforms = "DP-1:normal; DP-2:normal"
@@ -92,6 +99,7 @@ scale = 1.5
 timeout = 300
 
 [cursor]
+# Exact, case-sensitive theme directory name (for example, Arch Breeze is breeze_cursors).
 theme = "Adwaita"
 size = 24
 # Colon-separated search path when the theme is not under the default icon dirs.
@@ -106,7 +114,9 @@ options = "grp:alt_shift_toggle"
 numlock = true
 
 [auth]
-# Allow empty password submit (fprintd / smartcard PAM). Default false.
+# Allow an empty submit to start fprintd / smartcard PAM. Default false.
+# PAM remains serialized: this does not allow password input while pam_fprintd waits.
 allow_empty_password = false
-# Seconds to wait for each greetd reply (0-3600). 0 disables the watchdog.
+# Seconds to wait for each greetd reply (0-3600). Keep this longer than any
+# fingerprint timeout; 0 disables the watchdog.
 request_timeout = 60

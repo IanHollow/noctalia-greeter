@@ -25,11 +25,14 @@ and project flake modules.
 Run this from a graphical Wayland session:
 
 ```sh
-noctalia-greeter outputs
+noctalia-greeter outputs --details
 ```
 
-Use the connector names it prints, such as `DP-1` or `HDMI-A-1`, in the
-settings below.
+The first column is the connector name, such as `DP-1` or `HDMI-A-1`. When the
+display exposes EDID identity data, the second column is a stable identifier
+made from its manufacturer, model, and serial number. Either value can be used
+for `[output].name`. Layout, transform, scale, and per-output wallpaper entries
+continue to use connector names.
 
 ## Choose which monitors show the greeter
 
@@ -43,9 +46,19 @@ To show it on only one monitor, pin that connector:
 name = "DP-2"
 ```
 
+If connector numbers change across boots, use the stable identifier shown by
+`noctalia-greeter outputs --details` instead:
+
+```toml
+[output]
+name = "Acer Technologies XV242Y TL1EE0018521"
+```
+
 The compositor disables all other connectors at the KMS level while the
-greeter is running. If `name` is empty, missing, invalid, or refers to a
-disconnected monitor, the greeter falls back to all connected outputs.
+greeter is running. A non-selected connector that is already disabled remains
+off without a temporary modeset. If `name` is empty, missing, invalid, or
+refers to a disconnected monitor, the greeter falls back to all connected
+outputs.
 
 ## Arrange multiple monitors
 
@@ -73,9 +86,9 @@ one ready output. See [Sync with Noctalia](sync.md). Values declared in
 
 ## Match the desktop output mode
 
-By default, the compositor uses each display's EDID-preferred resolution and
-then selects the highest advertised refresh rate at that size. If this differs
-from the desktop session, the display may flash or modeset during login.
+By default, the compositor uses each display's complete EDID-preferred mode,
+including its refresh rate. This avoids selecting a higher advertised rate that
+a bandwidth-limited dock or MST link cannot drive.
 
 Set both `width` and `height` to request a particular resolution:
 
@@ -84,21 +97,38 @@ Set both `width` and `height` to request a particular resolution:
 name = "DP-2"
 width = 5120
 height = 2160
+refresh_rate = 120
 ```
 
 Both values are required and must be positive. A partial or invalid override
-is ignored. If the display does not advertise the requested size, the
-compositor logs a warning and falls back to the preferred-resolution behavior.
-At the requested size, it still chooses the highest advertised refresh rate.
+is ignored. `refresh_rate` is in hertz and can be set with or without an
+explicit size. Without `width` and `height`, it applies to the EDID-preferred
+resolution. Nominal rates match fractional DRM modes within 1 Hz, so `120`
+matches modes such as `119.998`. If the display does not advertise the requested
+size or a close refresh rate, the compositor logs a warning and falls back to
+the highest advertised refresh rate at the selected resolution.
+
+For multiple displays with different refresh rates, use the mapping form of the
+same key:
+
+```toml
+[output]
+refresh_rate = "DP-1:120; HDMI-A-1:60"
+```
+
+Entries are separated by semicolons and may use either connector names or the
+stable identifiers reported by `noctalia-greeter outputs --details`. Use either
+the numeric global form or the per-output mapping form, not both.
 
 :::note
-`width` and `height` select the physical DRM mode in pixels. They are separate
-from `scale`, which changes the size of the greeter interface. Mode dimensions
-are selected before any output rotation is applied.
+`width` and `height` select the physical DRM mode in pixels, while
+`refresh_rate` selects refresh rates in hertz. It is separate from `scale`,
+which changes the size of the greeter interface. Mode dimensions are selected
+before any output rotation is applied.
 :::
 
-Match the resolution to the desktop session to avoid an unnecessary resolution
-change when logging in.
+Match the resolution and refresh rate to the desktop session to avoid an
+unnecessary mode change when logging in.
 
 ## Rotate an output
 

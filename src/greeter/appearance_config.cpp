@@ -47,6 +47,66 @@ namespace {
     }
   }
 
+  [[nodiscard]] greeter::config::GreeterTomlWallpaper mergeTomlWallpaper(
+      const greeter::config::GreeterTomlWallpaper& fallback, const greeter::config::GreeterTomlWallpaper& preferred
+  ) {
+    greeter::config::GreeterTomlWallpaper result = fallback;
+    if (preferred.path.has_value()) {
+      result.path = preferred.path;
+    }
+    if (preferred.fillMode.has_value()) {
+      result.fillMode = preferred.fillMode;
+    }
+    if (preferred.fillColor.has_value()) {
+      result.fillColor = preferred.fillColor;
+    }
+    return result;
+  }
+
+  [[nodiscard]] greeter::config::GreeterTomlAppearance mergeWallpaperAppearance(
+      const greeter::config::GreeterTomlAppearance& fallback, const greeter::config::GreeterTomlAppearance& preferred
+  ) {
+    greeter::config::GreeterTomlAppearance result;
+    if (fallback.wallpaper.has_value()) {
+      result.wallpaper = fallback.wallpaper;
+    }
+    if (preferred.wallpaper.has_value()) {
+      result.wallpaper = result.wallpaper.has_value() ? mergeTomlWallpaper(*result.wallpaper, *preferred.wallpaper)
+                                                      : preferred.wallpaper;
+    }
+
+    result.wallpapers = fallback.wallpapers;
+    for (const auto& [connector, wallpaper] : preferred.wallpapers) {
+      const auto existing = result.wallpapers.find(connector);
+      if (existing == result.wallpapers.end()) {
+        result.wallpapers.emplace(connector, wallpaper);
+      } else {
+        existing->second = mergeTomlWallpaper(existing->second, wallpaper);
+      }
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::optional<GreeterWallpaperAppearance>
+  convertTomlWallpapers(const greeter::config::GreeterTomlAppearance& appearance) {
+    if (!appearance.wallpaper.has_value() && appearance.wallpapers.empty()) {
+      return std::nullopt;
+    }
+
+    GreeterWallpaperAppearance result;
+    if (appearance.wallpaper.has_value()) {
+      GreeterOutputWallpaper wallpaper;
+      applyTomlWallpaper(*appearance.wallpaper, wallpaper);
+      result.wallpaper = wallpaper;
+    }
+    for (const auto& [connector, wallpaper] : appearance.wallpapers) {
+      GreeterOutputWallpaper outputWallpaper;
+      applyTomlWallpaper(wallpaper, outputWallpaper);
+      result.wallpapersByOutput.emplace(connector, std::move(outputWallpaper));
+    }
+    return result;
+  }
+
   // Precondition: appearance.hasCompletePalette().
   [[nodiscard]] std::optional<GreeterSyncedAppearance>
   convertTomlAppearance(const greeter::config::GreeterTomlAppearance& appearance) {
@@ -73,22 +133,6 @@ namespace {
         || !parseTomlPaletteColor(appearance.palette, "on_hover", result.palette.onHover)) {
       kLog.warn("greeter.toml appearance.palette has an invalid hex value");
       return std::nullopt;
-    }
-
-    if (appearance.wallpaper.has_value()) {
-      GreeterOutputWallpaper single;
-      applyTomlWallpaper(*appearance.wallpaper, single);
-      result.wallpaperPath = single.path;
-      result.wallpaperFillMode = single.fillMode;
-      result.wallpaperFillColor = single.fillColor;
-    }
-
-    for (const auto& [connector, wallpaper] : appearance.wallpapers) {
-      GreeterOutputWallpaper entry;
-      applyTomlWallpaper(wallpaper, entry);
-      if (!entry.path.empty()) {
-        result.wallpapersByOutput.emplace(connector, std::move(entry));
-      }
     }
 
     return result;
@@ -126,4 +170,10 @@ std::optional<GreeterSyncedAppearance> loadGreeterSyncedAppearance() {
   }
 
   return std::nullopt;
+}
+
+std::optional<GreeterWallpaperAppearance> loadGreeterWallpaperAppearance() {
+  const auto config = greeter::config::loadConfig(greeter::appearance::packageConfPath());
+  const auto sync = greeter::config::loadSync(greeter::appearance::syncConfPath());
+  return convertTomlWallpapers(mergeWallpaperAppearance(sync.appearance, config.appearance));
 }
