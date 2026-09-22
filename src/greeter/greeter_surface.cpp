@@ -1585,10 +1585,10 @@ void GreeterSurface::beginSessionStart() {
   }
 
   // greetd cmd is argv; Exec= may be multiple tokens (e.g. "dbus-run-session gnome-session").
+  // x11 sessions are wrapped in noctalia-greeter-xsession to bootstrap Xorg first.
   {
-    std::istringstream stream(session.command);
-    std::string token;
-    if (!(stream >> token) || token.empty()) {
+    const std::vector<std::string> argv = greeter::sessionArgv(session);
+    if (argv.empty()) {
       kLog.error("session '{}' has empty Exec", session.name);
       m_authenticating = false;
       clearPasswordInput();
@@ -1600,10 +1600,8 @@ void GreeterSurface::beginSessionStart() {
       commitImmediateFrame(false);
       return;
     }
-    cmd.command = token;
-    while (stream >> token) {
-      cmd.arguments.push_back(token);
-    }
+    cmd.command = argv.front();
+    cmd.arguments.assign(argv.begin() + 1, argv.end());
   }
   cmd.environment = greeter::sessionStartEnvironment(session);
   {
