@@ -92,6 +92,11 @@ static void compositor_log_stderr(int priority, const char* format, ...) {
 }
 
 static void compositor_wlr_log(enum wlr_log_importance importance, const char* format, va_list args) {
+  // wlroots delegates verbosity filtering to custom log callbacks.
+  if (importance > wlr_log_get_verbosity()) {
+    return;
+  }
+
   va_list stderr_args;
   va_copy(stderr_args, args);
   if (compositor_syslog_enabled) {
@@ -110,6 +115,28 @@ static void compositor_init_logging(void) {
   if (compositor_syslog_enabled) {
     openlog("noctalia-greeter-compositor", LOG_PID | LOG_NDELAY, LOG_DAEMON);
   }
+}
+
+static enum wlr_log_importance compositor_wlr_log_importance(void) {
+  const char* configured = getenv("WLR_LOG");
+  if (configured == NULL || configured[0] == '\0') {
+    return WLR_INFO;
+  }
+  if (strcmp(configured, "silent") == 0) {
+    return WLR_SILENT;
+  }
+  if (strcmp(configured, "error") == 0) {
+    return WLR_ERROR;
+  }
+  if (strcmp(configured, "info") == 0) {
+    return WLR_INFO;
+  }
+  if (strcmp(configured, "debug") == 0) {
+    return WLR_DEBUG;
+  }
+
+  compositor_log_stderr(LOG_WARNING, "unrecognized WLR_LOG=%s; using info\n", configured);
+  return WLR_INFO;
 }
 
 static void configure_direct_scanout(void) {
@@ -2439,7 +2466,7 @@ static void cleanup_server_resources(struct greeter_server* server) {
 
 int main(int argc, char** argv) {
   compositor_init_logging();
-  wlr_log_init(WLR_INFO, compositor_wlr_log);
+  wlr_log_init(compositor_wlr_log_importance(), compositor_wlr_log);
   configure_direct_scanout();
 
   struct greeter_server server = {0};
