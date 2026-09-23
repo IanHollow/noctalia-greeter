@@ -112,6 +112,23 @@ static void compositor_init_logging(void) {
   }
 }
 
+static void configure_direct_scanout(void) {
+  const char* configured = getenv("WLR_SCENE_DISABLE_DIRECT_SCANOUT");
+  if (configured != NULL) {
+    wlr_log(WLR_INFO, "honoring WLR_SCENE_DISABLE_DIRECT_SCANOUT=%s", configured);
+    return;
+  }
+
+  // A greeter favors reliable presentation over bypassing one composition
+  // pass. In particular, wlroots 0.20 direct scan-out tests can destabilize
+  // otherwise working multi-output DRM configurations on some drivers.
+  if (setenv("WLR_SCENE_DISABLE_DIRECT_SCANOUT", "1", 0) != 0) {
+    wlr_log(WLR_ERROR, "failed to disable direct scan-out by default");
+    return;
+  }
+  wlr_log(WLR_INFO, "direct scan-out disabled by default");
+}
+
 struct greeter_server;
 
 struct greeter_output {
@@ -2423,6 +2440,7 @@ static void cleanup_server_resources(struct greeter_server* server) {
 int main(int argc, char** argv) {
   compositor_init_logging();
   wlr_log_init(WLR_INFO, compositor_wlr_log);
+  configure_direct_scanout();
 
   struct greeter_server server = {0};
   server.idle_timerfd = -1;
