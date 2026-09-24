@@ -76,7 +76,9 @@ fill_mode = "crop"
 # List both with: noctalia-greeter outputs --details
 name = "DP-2"
 # name = "Acer Technologies XV242Y TL1EE0018521"
-# Multi-monitor positions (logical pixels). Overrides Sync layout in sync.toml when set.
+# Multi-monitor positions (logical pixels). Connector names or stable identifiers; use semicolons when identifiers
+# contain spaces. Outputs omitted from the mapping are appended to the right with automatic scale.
+# Overrides Sync layout in sync.toml when set.
 layout = "DP-1:0,0; DP-2:2560,0"
 # Preferred DRM mode size in pixels (both required if set).
 width = 5120
@@ -85,10 +87,11 @@ height = 2160
 refresh_rate = 120
 # Or configure different rates per output (use one form or the other).
 # refresh_rate = "DP-1:120; HDMI-A-1:60"
-# Per-connector DRM transform. Overrides Sync transforms in sync.toml when set.
+# Per-output DRM transform by connector or stable identifier. Overrides Sync transforms in sync.toml when set.
 # Tokens: normal/0/none, 90, 180, 270, flipped, flipped-90, flipped-180, flipped-270
 transforms = "DP-1:normal; DP-2:normal"
-# Per-connector scale matching the session (logical layout coords). Overrides Sync scales when set.
+# Per-output scale by connector or stable identifier, matching the session's logical layout coordinates.
+# Overrides Sync scales when set.
 # Distinct from global `scale` below, which forces one scale on every output.
 scales = "DP-1:1; DP-2:1"
 # Manual UI scale for all outputs; omit or invalid -> per-output scales, else auto from display geometry.

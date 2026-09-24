@@ -94,6 +94,7 @@ foreach _p : [
 endforeach
 
 _greeter_sources = files(
+  'src/config/output_identity.c',
   'src/core/log.cpp',
   'src/core/deferred_call.cpp',
   'src/core/resource_paths.cpp',
@@ -285,10 +286,11 @@ install_data(
   install_dir: get_option('prefix') / 'lib' / 'tmpfiles.d',
 )
 
-executable('noctalia-greeter-compositor',
+noctalia_greeter_compositor_executable = executable('noctalia-greeter-compositor',
   sources: files(
     'src/compositor/noctalia_compositor.c',
     'src/compositor/system_keyboard_config.c',
+    'src/config/output_identity.c',
     'src/core/log.cpp',
     'src/greeter/greeter_config_io.cpp',
   ),
@@ -383,6 +385,29 @@ system_keyboard_config_test = executable(
 )
 
 test('system-keyboard-config', system_keyboard_config_test)
+
+output_identity_test = executable(
+  'output-identity-test',
+  sources: files(
+    'tests/output_identity_test.cpp',
+    'src/config/output_identity.c',
+  ),
+  include_directories: include_directories('src'),
+  cpp_args: ['-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wshadow'],
+  build_by_default: false,
+)
+
+test('output-identity', output_identity_test)
+
+test(
+  'compositor-headless-layout',
+  find_program('sh'),
+  args: [
+    meson.project_source_root() / 'tests/compositor_headless_test.sh',
+    noctalia_greeter_compositor_executable,
+    find_program('true').full_path(),
+  ],
+)
 
 session_discovery_test = executable(
   'session-discovery-test',

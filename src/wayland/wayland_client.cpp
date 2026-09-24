@@ -1,5 +1,6 @@
 #include "wayland/wayland_client.h"
 
+#include "config/output_identity.h"
 #include "core/log.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "greeter/greeter_preferences.h"
@@ -99,9 +100,9 @@ namespace {
   }
 
   [[nodiscard]] int
-  outputLayoutIndex(const std::vector<greeter::GreeterOutputPlacement>& layout, std::string_view name) {
+  outputLayoutIndex(const std::vector<greeter::GreeterOutputPlacement>& layout, const WaylandOutputInfo& output) {
     for (std::size_t i = 0; i < layout.size(); ++i) {
-      if (layout[i].name == name) {
+      if (output.matchesIdentifier(layout[i].name)) {
         return static_cast<int>(i);
       }
     }
@@ -116,7 +117,7 @@ namespace {
     }
 
     for (const auto& placement : layout) {
-      if (placement.name != output.name) {
+      if (!output.matchesIdentifier(placement.name)) {
         continue;
       }
       const auto logical = logicalSizeForOutputInfo(output);
@@ -204,34 +205,20 @@ namespace {
 } // namespace
 
 std::string WaylandOutputInfo::stableIdentifier() const {
-  if (!description.empty()) {
-    const std::string connectorSuffix = " (" + name + ")";
-    if (!name.empty() && description.ends_with(connectorSuffix)) {
-      return description.substr(0, description.size() - connectorSuffix.size());
-    }
-    if (description != name) {
-      return description;
-    }
+  char identifier[512];
+  if (greeter_output_stable_identifier(
+          name.c_str(), make.c_str(), model.c_str(), nullptr, description.c_str(), identifier, sizeof(identifier)
+      )) {
+    return identifier;
   }
-
-  std::string identifier;
-  for (const std::string* component : {&make, &model}) {
-    if (component->empty()) {
-      continue;
-    }
-    if (!identifier.empty()) {
-      identifier += ' ';
-    }
-    identifier += *component;
-  }
-  return identifier;
+  return {};
 }
 
 bool WaylandOutputInfo::matchesIdentifier(const std::string_view identifier) const {
-  if (identifier.empty()) {
-    return false;
-  }
-  return name == identifier || description == identifier || stableIdentifier() == identifier;
+  const std::string value(identifier);
+  return greeter_output_identifier_matches(
+      name.c_str(), make.c_str(), model.c_str(), nullptr, description.c_str(), value.c_str()
+  );
 }
 
 WaylandClient::WaylandClient() = default;
@@ -517,8 +504,8 @@ std::vector<const WaylandOutputInfo*> WaylandClient::readyOutputsSorted() const 
   }
   std::sort(ready.begin(), ready.end(), [this](const WaylandOutputInfo* lhs, const WaylandOutputInfo* rhs) {
     if (!m_outputLayout.empty()) {
-      const int leftIndex = outputLayoutIndex(m_outputLayout, lhs->name);
-      const int rightIndex = outputLayoutIndex(m_outputLayout, rhs->name);
+      const int leftIndex = outputLayoutIndex(m_outputLayout, *lhs);
+      const int rightIndex = outputLayoutIndex(m_outputLayout, *rhs);
       if (leftIndex >= 0 && rightIndex >= 0) {
         return leftIndex < rightIndex;
       }
@@ -574,7 +561,7 @@ std::optional<WaylandOutputLayout> WaylandClient::layoutForOutput(const WaylandO
     // then chain the omitted connectors by name.
     if (!m_outputLayout.empty()) {
       for (const WaylandOutputInfo* candidate : ordered) {
-        const int placementIndex = outputLayoutIndex(m_outputLayout, candidate->name);
+        const int placementIndex = outputLayoutIndex(m_outputLayout, *candidate);
         if (placementIndex < 0) {
           continue;
         }
@@ -589,7 +576,7 @@ std::optional<WaylandOutputLayout> WaylandClient::layoutForOutput(const WaylandO
     }
 
     for (const WaylandOutputInfo* candidate : ordered) {
-      if (outputLayoutIndex(m_outputLayout, candidate->name) >= 0) {
+      if (outputLayoutIndex(m_outputLayout, *candidate) >= 0) {
         continue;
       }
       if (candidate->output == output.output) {

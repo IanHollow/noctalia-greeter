@@ -39,6 +39,34 @@ namespace {
     return std::string(value.substr(begin, end - begin));
   }
 
+  template <typename Callback> void forEachOutputMappingEntry(std::string_view raw, Callback&& callback) {
+    const bool semicolonSeparated = raw.find(';') != std::string_view::npos;
+    std::size_t begin = 0;
+    while (begin < raw.size()) {
+      while (
+          begin < raw.size()
+          && (std::isspace(static_cast<unsigned char>(raw[begin])) != 0 || (semicolonSeparated && raw[begin] == ';'))) {
+        ++begin;
+      }
+      if (begin >= raw.size()) {
+        break;
+      }
+
+      std::size_t end = begin;
+      if (semicolonSeparated) {
+        while (end < raw.size() && raw[end] != ';') {
+          ++end;
+        }
+      } else {
+        while (end < raw.size() && std::isspace(static_cast<unsigned char>(raw[end])) == 0) {
+          ++end;
+        }
+      }
+      callback(raw.substr(begin, end - begin));
+      begin = end;
+    }
+  }
+
   [[nodiscard]] std::optional<greeter::GreeterOutputPlacement> parseOutputLayoutEntry(std::string_view token) {
     const std::string trimmed = trim(token);
     if (trimmed.empty()) {
@@ -95,33 +123,13 @@ namespace {
 
   [[nodiscard]] std::vector<greeter::GreeterOutputPlacement> parseOutputLayoutValue(std::string_view raw) {
     std::vector<greeter::GreeterOutputPlacement> placements;
-    std::string normalized;
-    normalized.reserve(raw.size());
-    for (const char ch : raw) {
-      normalized.push_back(ch == ';' ? ' ' : ch);
-    }
-
-    std::size_t begin = 0;
-    while (begin < normalized.size()) {
-      while (begin < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[begin])) != 0) {
-        ++begin;
-      }
-      if (begin >= normalized.size()) {
-        break;
-      }
-
-      std::size_t end = begin;
-      while (end < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[end])) == 0) {
-        ++end;
-      }
-
-      if (const auto placement = parseOutputLayoutEntry(normalized.substr(begin, end - begin))) {
+    forEachOutputMappingEntry(raw, [&placements](const std::string_view entry) {
+      if (const auto placement = parseOutputLayoutEntry(entry)) {
         placements.push_back(*placement);
       } else {
-        kLog.warn("ignoring invalid output layout entry '{}'", normalized.substr(begin, end - begin));
+        kLog.warn("ignoring invalid output layout entry '{}'", entry);
       }
-      begin = end;
-    }
+    });
 
     return placements;
   }
@@ -181,65 +189,25 @@ namespace {
 
   [[nodiscard]] std::size_t countValidOutputScaleEntries(std::string_view raw) {
     std::size_t count = 0;
-    std::string normalized;
-    normalized.reserve(raw.size());
-    for (const char ch : raw) {
-      normalized.push_back(ch == ';' ? ' ' : ch);
-    }
-
-    std::size_t begin = 0;
-    while (begin < normalized.size()) {
-      while (begin < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[begin])) != 0) {
-        ++begin;
-      }
-      if (begin >= normalized.size()) {
-        break;
-      }
-
-      std::size_t end = begin;
-      while (end < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[end])) == 0) {
-        ++end;
-      }
-
-      if (parseOutputScaleEntry(normalized.substr(begin, end - begin))) {
+    forEachOutputMappingEntry(raw, [&count](const std::string_view entry) {
+      if (parseOutputScaleEntry(entry)) {
         ++count;
       } else {
-        kLog.warn("ignoring invalid output scale entry '{}'", normalized.substr(begin, end - begin));
+        kLog.warn("ignoring invalid output scale entry '{}'", entry);
       }
-      begin = end;
-    }
+    });
     return count;
   }
 
   [[nodiscard]] std::size_t countValidOutputTransformEntries(std::string_view raw) {
     std::size_t count = 0;
-    std::string normalized;
-    normalized.reserve(raw.size());
-    for (const char ch : raw) {
-      normalized.push_back(ch == ';' ? ' ' : ch);
-    }
-
-    std::size_t begin = 0;
-    while (begin < normalized.size()) {
-      while (begin < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[begin])) != 0) {
-        ++begin;
-      }
-      if (begin >= normalized.size()) {
-        break;
-      }
-
-      std::size_t end = begin;
-      while (end < normalized.size() && std::isspace(static_cast<unsigned char>(normalized[end])) == 0) {
-        ++end;
-      }
-
-      if (parseOutputTransformEntry(normalized.substr(begin, end - begin))) {
+    forEachOutputMappingEntry(raw, [&count](const std::string_view entry) {
+      if (parseOutputTransformEntry(entry)) {
         ++count;
       } else {
-        kLog.warn("ignoring invalid output transform entry '{}'", normalized.substr(begin, end - begin));
+        kLog.warn("ignoring invalid output transform entry '{}'", entry);
       }
-      begin = end;
-    }
+    });
 
     return count;
   }

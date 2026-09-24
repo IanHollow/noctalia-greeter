@@ -1,6 +1,7 @@
 #include "greeter/appearance_config.h"
 #include "greeter/appearance_sync.h"
 #include "greeter/greeter_config_io.h"
+#include "greeter/greeter_preferences.h"
 #include "tools/secure_appearance_sync.h"
 
 #include <algorithm>
@@ -244,6 +245,28 @@ refresh_rate = 120
       expect("output width parses", config.manual_mode_width == 1920, true, {}, passed);
       expect("output height parses", config.manual_mode_height == 1080, true, {}, passed);
       expect("output refresh rate parses", config.manual_mode_refresh_mhz == 120000, true, {}, passed);
+    }
+
+    {
+      Fixture fixture(0700, 0600);
+      const ScopedStateDirectory stateDirectory(fixture.runtimeDirectory);
+      const std::string layout = "Dell Inc. DELL U2723QE ABC123:0,0; LG Electronics LG HDR 4K XYZ789:2560,0";
+      const bool applied = greeter::applyAppearanceSyncGreeterConf(
+          layout, "Dell Inc. DELL U2723QE ABC123:normal; LG Electronics LG HDR 4K XYZ789:90",
+          "Dell Inc. DELL U2723QE ABC123:1.25; LG Electronics LG HDR 4K XYZ789:1.5", std::nullopt
+      );
+      expect("stable output mappings with spaces are accepted", applied, true, {}, passed);
+
+      const auto placements = greeter::loadGreeterOutputLayout();
+      expect("two stable layout entries parse", placements.size() == 2, true, {}, passed);
+      expect(
+          "first stable layout identifier is preserved",
+          placements.size() == 2 && placements[0].name == "Dell Inc. DELL U2723QE ABC123", true, {}, passed
+      );
+      expect(
+          "second stable layout coordinates parse",
+          placements.size() == 2 && placements[1].x == 2560 && placements[1].y == 0, true, {}, passed
+      );
     }
 
     {

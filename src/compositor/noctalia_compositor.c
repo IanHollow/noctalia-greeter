@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "compositor/system_keyboard_config.h"
+#include "config/output_identity.h"
 #include "greeter/greeter_config_io.h"
 
 #include <ctype.h>
@@ -39,6 +40,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_switch.h>
 #include <wlr/types/wlr_touch.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -170,6 +172,7 @@ struct greeter_output {
   struct greeter_view* view;
   bool active;
   bool render_initialized;
+  bool lid_suppressed;
 };
 
 struct greeter_keyboard {
@@ -179,6 +182,15 @@ struct greeter_keyboard {
   struct wl_listener modifiers;
   struct wl_listener key;
   struct wl_listener destroy;
+};
+
+struct greeter_switch {
+  struct wl_list link;
+  struct greeter_server* server;
+  struct wlr_switch* wlr_switch;
+  struct wl_listener toggle;
+  struct wl_listener destroy;
+  bool lid_closed;
 };
 
 struct greeter_touch_point {
@@ -203,18 +215,18 @@ struct greeter_view {
 };
 
 struct greeter_output_placement {
-  char name[128];
+  char name[512];
   int x;
   int y;
 };
 
 struct greeter_output_transform {
-  char name[128];
+  char name[512];
   enum wl_output_transform transform;
 };
 
 struct greeter_output_scale {
-  char name[128];
+  char name[512];
   float scale;
 };
 
@@ -238,6 +250,7 @@ struct greeter_server {
   struct wlr_seat* seat;
   struct wl_list outputs;
   struct wl_list keyboards;
+  struct wl_list switches;
   struct wl_list touch_points;
   struct wl_listener new_output;
   struct wl_listener new_input;
@@ -362,6 +375,20 @@ static float fallback_scale_for_resolution(int mode_width, int mode_height) {
   return 1.0f;
 }
 
+static bool output_matches_identifier(const struct wlr_output* output, const char* identifier);
+
+static bool output_has_configured_layout(const struct greeter_server* server, const struct wlr_output* output) {
+  if (output == NULL) {
+    return false;
+  }
+  for (size_t i = 0; i < server->output_placement_count; ++i) {
+    if (output_matches_identifier(output, server->output_placements[i].name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static float
 output_ui_scale(const struct greeter_server* server, const struct wlr_output* output, int mode_width, int mode_height) {
   // greeter.toml [output].scale (all outputs) wins over per-output scales from sync/config.
@@ -370,14 +397,17 @@ output_ui_scale(const struct greeter_server* server, const struct wlr_output* ou
   }
   if (output != NULL && output->name != NULL) {
     for (size_t i = 0; i < server->output_scale_count; ++i) {
-      if (strcmp(server->output_scales[i].name, output->name) == 0) {
+      if (output_matches_identifier(output, server->output_scales[i].name)) {
         return clamp_configured_scale(server->output_scales[i].scale);
       }
     }
   }
-  // Absolute layout coords are session-logical. Without matching scales, auto DPI scale opens
-  // cursor gaps — stay at 1.0 until Sync provides [output].scales.
-  if (server->output_placement_count > 0) {
+  // A configured position was recorded in session-logical coordinates. Keep
+  // the conservative legacy scale when its matching scale is unavailable.
+  // Outputs omitted from the layout are appended using their actual logical
+  // width, so automatic scaling is safe for newly connected displays.
+  if (output_has_configured_layout(server, output)) {
+    wlr_log(WLR_INFO, "output %s has a configured layout but no matching scale; using 1.0", output->name);
     return 1.0f;
   }
 
@@ -391,8 +421,11 @@ output_ui_scale(const struct greeter_server* server, const struct wlr_output* ou
 }
 
 static bool parse_output_layout_entry(const char* token, struct greeter_output_placement* out) {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "%s", token);
+  char buf[1024];
+  const int token_len = snprintf(buf, sizeof(buf), "%s", token);
+  if (token_len < 0 || (size_t)token_len >= sizeof(buf)) {
+    return false;
+  }
   char* colon = strrchr(buf, ':');
   if (colon == NULL || colon == buf) {
     return false;
@@ -414,7 +447,10 @@ static bool parse_output_layout_entry(const char* token, struct greeter_output_p
   if (end == comma + 1) {
     return false;
   }
-  snprintf(out->name, sizeof(out->name), "%s", name);
+  const int name_len = snprintf(out->name, sizeof(out->name), "%s", name);
+  if (name_len < 0 || (size_t)name_len >= sizeof(out->name)) {
+    return false;
+  }
   out->x = (int)x;
   out->y = (int)y;
   return true;
@@ -422,14 +458,12 @@ static bool parse_output_layout_entry(const char* token, struct greeter_output_p
 
 static void parse_output_layout_value(struct greeter_server* server, char* value) {
   server->output_placement_count = 0;
-  for (char* p = value; *p != '\0'; ++p) {
-    if (*p == ';') {
-      *p = ' ';
-    }
-  }
+  const char* delimiters = strchr(value, ';') != NULL ? ";" : " \t";
 
   char* saveptr = NULL;
-  for (char* token = strtok_r(value, " \t", &saveptr); token != NULL; token = strtok_r(NULL, " \t", &saveptr)) {
+  for (char* token = strtok_r(value, delimiters, &saveptr); token != NULL;
+       token = strtok_r(NULL, delimiters, &saveptr)) {
+    token = trim(token);
     if (server->output_placement_count >= sizeof(server->output_placements) / sizeof(server->output_placements[0])) {
       wlr_log(
           WLR_ERROR, "output_layout: too many entries (max %zu)",
@@ -486,7 +520,7 @@ static bool parse_transform_token(const char* token, enum wl_output_transform* o
 }
 
 static bool parse_output_transform_entry(const char* token, struct greeter_output_transform* out) {
-  char buf[256];
+  char buf[1024];
   if (token == NULL || out == NULL) {
     return false;
   }
@@ -518,14 +552,12 @@ static bool parse_output_transform_entry(const char* token, struct greeter_outpu
 
 static void parse_output_transforms_value(struct greeter_server* server, char* value) {
   server->output_transform_count = 0;
-  for (char* p = value; *p != '\0'; ++p) {
-    if (*p == ';') {
-      *p = ' ';
-    }
-  }
+  const char* delimiters = strchr(value, ';') != NULL ? ";" : " \t";
 
   char* saveptr = NULL;
-  for (char* token = strtok_r(value, " \t", &saveptr); token != NULL; token = strtok_r(NULL, " \t", &saveptr)) {
+  for (char* token = strtok_r(value, delimiters, &saveptr); token != NULL;
+       token = strtok_r(NULL, delimiters, &saveptr)) {
+    token = trim(token);
     if (server->output_transform_count >= sizeof(server->output_transforms) / sizeof(server->output_transforms[0])) {
       wlr_log(
           WLR_ERROR, "output_transforms: too many entries (max %zu)",
@@ -543,12 +575,13 @@ static void parse_output_transforms_value(struct greeter_server* server, char* v
   }
 }
 
-static enum wl_output_transform transform_for_output(const struct greeter_server* server, const char* name) {
-  if (name == NULL || name[0] == '\0') {
+static enum wl_output_transform
+transform_for_output(const struct greeter_server* server, const struct wlr_output* output) {
+  if (output == NULL) {
     return WL_OUTPUT_TRANSFORM_NORMAL;
   }
   for (size_t i = 0; i < server->output_transform_count; ++i) {
-    if (strcmp(server->output_transforms[i].name, name) == 0) {
+    if (output_matches_identifier(output, server->output_transforms[i].name)) {
       return server->output_transforms[i].transform;
     }
   }
@@ -556,8 +589,11 @@ static enum wl_output_transform transform_for_output(const struct greeter_server
 }
 
 static bool parse_output_scale_entry(const char* token, struct greeter_output_scale* out) {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "%s", token);
+  char buf[1024];
+  const int token_len = snprintf(buf, sizeof(buf), "%s", token);
+  if (token_len < 0 || (size_t)token_len >= sizeof(buf)) {
+    return false;
+  }
   char* colon = strrchr(buf, ':');
   if (colon == NULL || colon == buf) {
     return false;
@@ -573,21 +609,22 @@ static bool parse_output_scale_entry(const char* token, struct greeter_output_sc
   if (end == scale_raw || *end != '\0' || scale < 1.0f) {
     return false;
   }
-  snprintf(out->name, sizeof(out->name), "%s", name);
+  const int name_len = snprintf(out->name, sizeof(out->name), "%s", name);
+  if (name_len < 0 || (size_t)name_len >= sizeof(out->name)) {
+    return false;
+  }
   out->scale = scale;
   return true;
 }
 
 static void parse_output_scales_value(struct greeter_server* server, char* value) {
   server->output_scale_count = 0;
-  for (char* p = value; *p != '\0'; ++p) {
-    if (*p == ';') {
-      *p = ' ';
-    }
-  }
+  const char* delimiters = strchr(value, ';') != NULL ? ";" : " \t";
 
   char* saveptr = NULL;
-  for (char* token = strtok_r(value, " \t", &saveptr); token != NULL; token = strtok_r(NULL, " \t", &saveptr)) {
+  for (char* token = strtok_r(value, delimiters, &saveptr); token != NULL;
+       token = strtok_r(NULL, delimiters, &saveptr)) {
+    token = trim(token);
     if (server->output_scale_count >= sizeof(server->output_scales) / sizeof(server->output_scales[0])) {
       wlr_log(
           WLR_ERROR, "output_scales: too many entries (max %zu)",
@@ -828,52 +865,10 @@ notify_surface_scale(struct greeter_server* server, struct wlr_surface* surface,
 
 static bool use_all_outputs(const struct greeter_server* server) { return server->preferred_output[0] == '\0'; }
 
-static void append_output_identifier_component(char* identifier, size_t size, const char* component) {
-  if (component == NULL || component[0] == '\0') {
-    return;
-  }
-  const size_t length = strlen(identifier);
-  if (length >= size - 1) {
-    return;
-  }
-  snprintf(identifier + length, size - length, "%s%s", length > 0 ? " " : "", component);
-}
-
-static void output_stable_identifier(const struct wlr_output* output, char* identifier, size_t size) {
-  identifier[0] = '\0';
-  append_output_identifier_component(identifier, size, output->make);
-  append_output_identifier_component(identifier, size, output->model);
-  append_output_identifier_component(identifier, size, output->serial);
-}
-
 static bool output_matches_identifier(const struct wlr_output* output, const char* identifier) {
-  if (strcmp(output->name, identifier) == 0) {
-    return true;
-  }
-
-  char stable[512];
-  output_stable_identifier(output, stable, sizeof(stable));
-  if (stable[0] != '\0' && strcmp(stable, identifier) == 0) {
-    return true;
-  }
-  if (output->description == NULL) {
-    return false;
-  }
-  if (strcmp(output->description, identifier) == 0) {
-    return true;
-  }
-
-  // wlroots descriptions conventionally append the volatile connector as
-  // " (DP-1)". Accept the stable prefix as an identifier as well.
-  char suffix[512];
-  snprintf(suffix, sizeof(suffix), " (%s)", output->name);
-  const size_t description_length = strlen(output->description);
-  const size_t suffix_length = strlen(suffix);
-  const size_t identifier_length = strlen(identifier);
-  return description_length > suffix_length
-      && identifier_length == description_length - suffix_length
-      && strcmp(output->description + description_length - suffix_length, suffix) == 0
-      && strncmp(output->description, identifier, identifier_length) == 0;
+  return greeter_output_identifier_matches(
+      output->name, output->make, output->model, output->serial, output->description, identifier
+  );
 }
 
 static struct greeter_output* output_by_identifier(struct greeter_server* server, const char* identifier) {
@@ -895,16 +890,6 @@ static int output_refresh_rate(const struct greeter_server* server, const struct
   return server->manual_mode_refresh_mhz;
 }
 
-static struct greeter_output* output_by_name(struct greeter_server* server, const char* name) {
-  struct greeter_output* output;
-  wl_list_for_each(output, &server->outputs, link) {
-    if (strcmp(output->wlr_output->name, name) == 0) {
-      return output;
-    }
-  }
-  return NULL;
-}
-
 static bool any_output_active(const struct greeter_server* server) {
   const struct greeter_output* output;
   wl_list_for_each(output, &server->outputs, link) {
@@ -915,6 +900,40 @@ static bool any_output_active(const struct greeter_server* server) {
   return false;
 }
 
+static bool any_lid_closed(const struct greeter_server* server) {
+  const struct greeter_switch* device;
+  wl_list_for_each(device, &server->switches, link) {
+    if (device->lid_closed) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool any_external_output_connected(const struct greeter_server* server) {
+  const struct greeter_output* output;
+  wl_list_for_each(output, &server->outputs, link) {
+    if (!greeter_output_name_is_internal(output->wlr_output->name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool any_external_output_active(const struct greeter_server* server) {
+  const struct greeter_output* output;
+  wl_list_for_each(output, &server->outputs, link) {
+    if (output->active && !greeter_output_name_is_internal(output->wlr_output->name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool omit_output_for_lid(const struct greeter_output* output, bool suppress_internal) {
+  return suppress_internal && greeter_output_name_is_internal(output->wlr_output->name);
+}
+
 static int compare_greeter_output_ptr(const void* a, const void* b) {
   const struct greeter_output* const* oa = a;
   const struct greeter_output* const* ob = b;
@@ -923,9 +942,9 @@ static int compare_greeter_output_ptr(const void* a, const void* b) {
 
 static const struct greeter_server* g_layout_sort_server;
 
-static int configured_output_index(const struct greeter_server* server, const char* name) {
+static int configured_output_index(const struct greeter_server* server, const struct wlr_output* output) {
   for (size_t i = 0; i < server->output_placement_count; ++i) {
-    if (strcmp(server->output_placements[i].name, name) == 0) {
+    if (output_matches_identifier(output, server->output_placements[i].name)) {
       return (int)i;
     }
   }
@@ -935,8 +954,8 @@ static int configured_output_index(const struct greeter_server* server, const ch
 static int compare_greeter_output_by_config(const void* a, const void* b) {
   const struct greeter_output* const* oa = a;
   const struct greeter_output* const* ob = b;
-  const int ia = configured_output_index(g_layout_sort_server, (*oa)->wlr_output->name);
-  const int ib = configured_output_index(g_layout_sort_server, (*ob)->wlr_output->name);
+  const int ia = configured_output_index(g_layout_sort_server, (*oa)->wlr_output);
+  const int ib = configured_output_index(g_layout_sort_server, (*ob)->wlr_output);
   if (ia >= 0 && ib >= 0) {
     return ia - ib;
   }
@@ -970,11 +989,13 @@ static size_t collect_outputs(struct greeter_server* server, struct greeter_outp
   return count;
 }
 
-static int layout_extents_max_x(struct greeter_server* server) {
+static int configured_layout_extents_max_x(struct greeter_server* server, bool suppress_internal) {
   int max_x = 0;
   struct greeter_output* output;
   wl_list_for_each(output, &server->outputs, link) {
-    if (!output->active) {
+    if (!output->active
+        || omit_output_for_lid(output, suppress_internal)
+        || configured_output_index(server, output->wlr_output) < 0) {
       continue;
     }
     struct wlr_box box;
@@ -991,12 +1012,15 @@ static int layout_extents_max_x(struct greeter_server* server) {
 
 static bool layout_output_at(struct greeter_output* output, int layout_x, int layout_y);
 
-static void layout_outputs_from_config(struct greeter_server* server) {
+static void layout_outputs_from_config(struct greeter_server* server, bool suppress_internal) {
   for (size_t i = 0; i < server->output_placement_count; ++i) {
     const struct greeter_output_placement* cfg = &server->output_placements[i];
-    struct greeter_output* output = output_by_name(server, cfg->name);
+    struct greeter_output* output = output_by_identifier(server, cfg->name);
     if (output == NULL) {
       wlr_log(WLR_INFO, "output_layout: '%s' not connected", cfg->name);
+      continue;
+    }
+    if (omit_output_for_lid(output, suppress_internal)) {
       continue;
     }
     if (!layout_output_at(output, cfg->x, cfg->y)) {
@@ -1012,14 +1036,15 @@ static void layout_outputs_from_config(struct greeter_server* server) {
     );
   }
 
-  int fallback_x = layout_extents_max_x(server);
+  int fallback_x = configured_layout_extents_max_x(server, suppress_internal);
   struct greeter_output* outputs[16];
   const size_t output_count = collect_outputs(server, outputs, 16);
   for (size_t i = 0; i < output_count; ++i) {
     struct greeter_output* output = outputs[i];
-    struct wlr_box box;
-    wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
-    if (box.width > 0) {
+    if (omit_output_for_lid(output, suppress_internal)) {
+      continue;
+    }
+    if (configured_output_index(server, output->wlr_output) >= 0) {
       continue;
     }
     if (layout_output_at(output, fallback_x, 0)) {
@@ -1343,6 +1368,33 @@ static void disable_output(struct greeter_output* output) {
   }
 }
 
+static void suppress_output_for_lid(struct greeter_output* output) {
+  if (output->lid_suppressed && !output->active) {
+    return;
+  }
+  disable_output(output);
+  if (output->active) {
+    wlr_log(WLR_ERROR, "could not suppress internal output %s after lid close", output->wlr_output->name);
+    return;
+  }
+  if (output->wlr_output->global != NULL) {
+    wlr_output_destroy_global(output->wlr_output);
+  }
+  output->lid_suppressed = true;
+  wlr_log(WLR_INFO, "lid closed: suppressed internal output %s", output->wlr_output->name);
+}
+
+static void restore_lid_suppressed_output(struct greeter_output* output) {
+  if (!output->lid_suppressed) {
+    return;
+  }
+  if (output->wlr_output->global == NULL) {
+    wlr_output_create_global(output->wlr_output, output->server->display);
+  }
+  output->lid_suppressed = false;
+  wlr_log(WLR_INFO, "restored internal output %s", output->wlr_output->name);
+}
+
 static struct wlr_output_mode*
 select_mode_at_size(struct wlr_output* wlr_output, int width, int height, int refresh_mhz) {
   struct wlr_output_mode* highest = NULL;
@@ -1423,7 +1475,7 @@ static bool commit_output_enabled(struct greeter_output* output) {
     wlr_output_state_set_mode(&state, mode);
     wlr_log(WLR_INFO, "selected output mode: %dx%d @ %.3f Hz", mode->width, mode->height, mode->refresh / 1000.0);
   }
-  const enum wl_output_transform transform = transform_for_output(server, output->wlr_output->name);
+  const enum wl_output_transform transform = transform_for_output(server, output->wlr_output);
   wlr_output_state_set_transform(&state, transform);
   const int mode_width = mode != NULL ? mode->width : 0;
   const int mode_height = mode != NULL ? mode->height : 0;
@@ -1503,6 +1555,7 @@ static bool layout_output_at(struct greeter_output* output, int layout_x, int la
     if (output->view != NULL && output->view->mapped) {
       configure_view(output->view);
     }
+    restore_lid_suppressed_output(output);
     wlr_output_schedule_frame(output->wlr_output);
     return true;
   }
@@ -1530,6 +1583,7 @@ static bool enable_layout_output(struct greeter_output* output, int layout_x, in
   wlr_scene_output_layout_add_output(server->scene_output_layout, output->layout_output, output->scene_output);
 
   output->active = true;
+  restore_lid_suppressed_output(output);
   load_cursor_theme_for_scale(server, output->wlr_output->scale);
   wlr_output_schedule_frame(output->wlr_output);
   return true;
@@ -1641,6 +1695,32 @@ static void schedule_launch(struct greeter_server* server) {
   }
 }
 
+static void layout_all_outputs(struct greeter_server* server, bool suppress_internal) {
+  if (server->output_placement_count > 0) {
+    layout_outputs_from_config(server, suppress_internal);
+    return;
+  }
+
+  struct greeter_output* outputs[16];
+  const size_t count = collect_outputs(server, outputs, 16);
+  int layout_x = 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (omit_output_for_lid(outputs[i], suppress_internal)) {
+      continue;
+    }
+    if (!layout_output_at(outputs[i], layout_x, 0)) {
+      continue;
+    }
+    wlr_log(WLR_INFO, "greeter output: %s at (%d,0)", outputs[i]->wlr_output->name, layout_x);
+    int width = 0;
+    int height = 0;
+    wlr_output_effective_resolution(outputs[i]->wlr_output, &width, &height);
+    if (width > 0) {
+      layout_x += width;
+    }
+  }
+}
+
 static void choose_outputs(struct greeter_server* server) {
   if (server->shutting_down || !session_is_active(server)) {
     return;
@@ -1677,27 +1757,23 @@ static void choose_outputs(struct greeter_server* server) {
   }
 
   if (use_all) {
-    if (server->output_placement_count > 0) {
-      layout_outputs_from_config(server);
-    } else {
-      struct greeter_output* outputs[16];
-      const size_t count = collect_outputs(server, outputs, 16);
-      int layout_x = 0;
-      for (size_t i = 0; i < count; ++i) {
-        if (!layout_output_at(outputs[i], layout_x, 0)) {
-          continue;
-        }
-        wlr_log(WLR_INFO, "greeter output: %s at (%d,0)", outputs[i]->wlr_output->name, layout_x);
-        int width = 0;
-        int height = 0;
-        wlr_output_effective_resolution(outputs[i]->wlr_output, &width, &height);
-        if (width > 0) {
-          layout_x += width;
+    const bool suppress_internal = any_lid_closed(server) && any_external_output_connected(server);
+    layout_all_outputs(server, suppress_internal);
+    if (suppress_internal && any_external_output_active(server)) {
+      wl_list_for_each(output, &server->outputs, link) {
+        if (greeter_output_name_is_internal(output->wlr_output->name)) {
+          suppress_output_for_lid(output);
         }
       }
+    } else if (suppress_internal) {
+      wlr_log(WLR_ERROR, "lid closed but no external output could be enabled; keeping internal output available");
+      layout_all_outputs(server, false);
     }
-  } else if (pinned != NULL && !pinned->active && enable_layout_output(pinned, 0, 0)) {
-    wlr_log(WLR_INFO, "greeter pinned output: %s", pinned->wlr_output->name);
+  } else if (pinned != NULL) {
+    if ((!pinned->active && enable_layout_output(pinned, 0, 0)) || pinned->active) {
+      restore_lid_suppressed_output(pinned);
+      wlr_log(WLR_INFO, "greeter pinned output: %s", pinned->wlr_output->name);
+    }
   }
 
   // Mapping also lets wlroots apply the output transform to absolute input
@@ -2121,6 +2197,51 @@ static void add_keyboard(struct greeter_server* server, struct wlr_input_device*
   focus_mapped_views(server);
 }
 
+static void handle_switch_toggle(struct wl_listener* listener, void* data) {
+  struct greeter_switch* device = wl_container_of(listener, device, toggle);
+  struct wlr_switch_toggle_event* event = data;
+  if (event->switch_type != WLR_SWITCH_TYPE_LID) {
+    return;
+  }
+
+  const bool closed = event->switch_state == WLR_SWITCH_STATE_ON;
+  if (device->lid_closed == closed) {
+    return;
+  }
+  device->lid_closed = closed;
+  wlr_log(WLR_INFO, "lid switch: %s", closed ? "closed" : "open");
+  choose_outputs(device->server);
+}
+
+static void handle_switch_destroy(struct wl_listener* listener, void* data) {
+  (void)data;
+  struct greeter_switch* device = wl_container_of(listener, device, destroy);
+  struct greeter_server* server = device->server;
+  const bool was_closed = device->lid_closed;
+  wl_list_remove(&device->toggle.link);
+  wl_list_remove(&device->destroy.link);
+  wl_list_remove(&device->link);
+  free(device);
+  if (was_closed && !server->shutting_down) {
+    choose_outputs(server);
+  }
+}
+
+static void add_switch(struct greeter_server* server, struct wlr_input_device* input) {
+  struct greeter_switch* device = calloc(1, sizeof(*device));
+  if (device == NULL) {
+    return;
+  }
+  device->server = server;
+  device->wlr_switch = wlr_switch_from_input_device(input);
+  device->toggle.notify = handle_switch_toggle;
+  wl_signal_add(&device->wlr_switch->events.toggle, &device->toggle);
+  device->destroy.notify = handle_switch_destroy;
+  wl_signal_add(&input->events.destroy, &device->destroy);
+  wl_list_insert(&server->switches, &device->link);
+  wlr_log(WLR_INFO, "switch: added %s", input->name);
+}
+
 static void handle_new_input(struct wl_listener* listener, void* data) {
   struct greeter_server* server = wl_container_of(listener, server, new_input);
   if (server->shutting_down) {
@@ -2147,6 +2268,9 @@ static void handle_new_input(struct wl_listener* listener, void* data) {
   case WLR_INPUT_DEVICE_TABLET:
     wlr_cursor_attach_input_device(server->cursor, device);
     caps |= WL_SEAT_CAPABILITY_POINTER;
+    break;
+  case WLR_INPUT_DEVICE_SWITCH:
+    add_switch(server, device);
     break;
   default:
     break;
@@ -2473,6 +2597,7 @@ int main(int argc, char** argv) {
   server.idle_timerfd = -1;
   wl_list_init(&server.outputs);
   wl_list_init(&server.keyboards);
+  wl_list_init(&server.switches);
   wl_list_init(&server.touch_points);
   read_greeter_config(&server);
   clock_gettime(CLOCK_MONOTONIC, &server.last_activity);
