@@ -59,6 +59,9 @@ Set these keys in `greeter.toml`. A command-line `--session` or `--user` value t
 | `[appearance].theme_mode` | Theme mode for the Synced appearance, such as `dark` |
 | `[appearance].corner_radius_scale` | Corner-radius scale for the Synced appearance |
 | `[appearance].font_family` | Fontconfig family for the Synced appearance |
+| `[appearance].font_scale` | Text scale from `0.5` to `3.0`, independent of control and icon size; default `1.0` |
+| `[appearance].panel_width` | Optional login panel width from `300` to `1000` logical pixels; omitted uses the adaptive width |
+| `[appearance].input_height` | Optional password field and submit button height from `32` to `96` logical pixels; omitted uses the normal control height |
 | `[appearance.palette]` | Complete Synced palette; takes precedence over Sync appearance |
 | `[appearance.wallpaper]` | Default wallpaper `path`, `fill_mode`, and `fill_color`; `fill_color` also works without an image, and `fill_mode` accepts `center`, `crop`, `fit`, `stretch`, `repeat`, or `span` |
 | `[appearance.wallpapers.<connector>]` | Per-output wallpaper override using the same fill modes |
