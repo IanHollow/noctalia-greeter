@@ -1070,17 +1070,6 @@ void GreeterSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
     m_backdrop->setVisible(true);
   }
 
-  if (m_bottomBrandLogo != nullptr) {
-    const bool hasBrandLogo = m_brandLogoTexture.id != 0 && !m_hideLogo;
-    m_bottomBrandLogo->setVisible(hasBrandLogo);
-    if (hasBrandLogo) {
-      const float logoSize = Style::scaled(64.0f);
-      m_bottomBrandLogo->setSize(logoSize, logoSize);
-      m_bottomBrandLogo->setPosition(ox + std::round((sw - logoSize) * 0.5f), oy + sh - logoSize - Style::spaceLg());
-      m_bottomBrandLogo->setTint(colorForRole(ColorRole::OnSurface, 0.88f));
-    }
-  }
-
   const float defaultPanelWidth = std::clamp(sw * 0.32f, Style::scaled(440.0f), Style::scaled(540.0f));
   const float panelWidth = m_panelWidth
       ? std::max(0.0f, std::min(Style::scaled(*m_panelWidth), sw - Style::spaceLg() * 2.0f))
@@ -1138,6 +1127,18 @@ void GreeterSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
       std::clamp(panelInnerHeight + panelTopPadding + panelBottomPadding, minPanelHeight, maxPanelHeight);
   const float panelX = ox + std::round((sw - panelWidth) * 0.5f);
   const float panelY = oy + std::round((sh - panelHeight) * 0.5f);
+  if (m_bottomBrandLogo != nullptr) {
+    const float logoSize = Style::scaled(64.0f);
+    const float logoY = oy + sh - logoSize - Style::spaceLg();
+    const bool hasRoom = logoY >= panelY + panelHeight + Style::spaceSm();
+    const bool showLogo = m_brandLogoTexture.id != 0 && !m_hideLogo && hasRoom;
+    m_bottomBrandLogo->setVisible(showLogo);
+    if (showLogo) {
+      m_bottomBrandLogo->setSize(logoSize, logoSize);
+      m_bottomBrandLogo->setPosition(ox + std::round((sw - logoSize) * 0.5f), logoY);
+      m_bottomBrandLogo->setTint(colorForRole(ColorRole::OnSurface, 0.88f));
+    }
+  }
   const float contentLeft = panelX + panelPadding;
   const float contentWidth = panelWidth - panelPadding * 2.0f;
 

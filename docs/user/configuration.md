@@ -78,6 +78,10 @@ Set these keys in `greeter.toml`. A command-line `--session` or `--user` value t
 | `[auth].allow_empty_password` | Permit an empty submission to start fprintd or smartcard PAM; this does not make password and fingerprint checks run in parallel |
 | `[auth].request_timeout` | Seconds to wait for each greetd reply (`0`–`3600`, default `60`); `0` disables the watchdog |
 
+At compact output heights, a large login panel can leave too little space for
+the decorative bottom logo. The greeter hides that logo when it would overlap
+the panel.
+
 Display and input settings have task-oriented guides:
 
 - [Displays](displays.md): connectors, layout, mode, transforms, scale, and idle blanking
