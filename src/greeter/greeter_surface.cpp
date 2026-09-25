@@ -571,6 +571,16 @@ void GreeterSurface::initialize(RenderContext* context) {
     return result;
   };
   m_powerCancel = confirmationButton("Cancel", ButtonVariant::Outline, [this]() { cancelPowerAction(); });
+  m_powerCancel->setCustomPalette(
+      Button::ButtonPalette{
+          .borderWidth = Style::borderWidth(),
+          .normal = makePaletteState(ColorRole::Surface, ColorRole::Outline, ColorRole::OnSurface),
+          .hover = makePaletteState(ColorRole::Surface, ColorRole::Outline, ColorRole::OnSurface),
+          .pressed = makePaletteState(ColorRole::SurfaceVariant, ColorRole::Primary, ColorRole::OnSurface),
+          .disabled = makePaletteState(ColorRole::Surface, ColorRole::Outline, ColorRole::OnSurface, 0.55f),
+          .selected = std::nullopt,
+      }
+  );
   m_powerConfirm = confirmationButton("Confirm", ButtonVariant::Destructive, [this]() { confirmPowerAction(); });
 
   m_canRebootToFirmware = power::canRebootToFirmwareSetup();
